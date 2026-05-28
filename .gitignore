@@ -1,0 +1,19 @@
+node_modules
+dist
+.claude/
+scripts/setup.mjs
+scripts/teste-conexao.mjs
+scripts/tour.mjs
+dist-ssr
+*.local
+
+# Service Account credentials — NUNCA commitar
+src/services/credentials*.json
+*.serviceaccount.json
+*.json.bak
+mystical-button-*.json
+*-6a77e2db6c6d.json
+
+.env
+.env.*
+!.env.example

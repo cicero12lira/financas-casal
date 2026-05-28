@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Fundo -->
+  <rect width="512" height="512" rx="96" fill="#0a0d1a"/>
+
+  <!-- Círculo decorativo externo -->
+  <circle cx="256" cy="220" r="148" fill="#6c63ff" opacity="0.12"/>
+  <circle cx="256" cy="220" r="130" fill="#111827"/>
+  <circle cx="256" cy="220" r="130" fill="none" stroke="#6c63ff" stroke-width="10"/>
+
+  <!-- Símbolo R$ -->
+  <text x="256" y="278" font-size="110" font-weight="700" text-anchor="middle"
+    font-family="Arial Black, Arial, sans-serif" fill="#6c63ff">R$</text>
+
+  <!-- Linha divisória -->
+  <rect x="96" y="390" width="320" height="3" rx="2" fill="#1e2a45"/>
+
+  <!-- Dois círculos = o casal -->
+  <circle cx="192" cy="436" r="22" fill="#6c63ff" opacity="0.9"/>
+  <circle cx="320" cy="436" r="22" fill="#00d4aa" opacity="0.9"/>
+
+  <!-- Coração entre eles -->
+  <path d="M248 444 C248 440 244 430 256 430 C268 430 264 440 264 444 L256 453 Z"
+    fill="#ff4757" opacity="0.85"/>
+</svg>
