@@ -1,11 +1,13 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 
 function FAB() {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const destino = pathname === '/pessoal' ? '/novo?escopo=pessoal' : '/novo'
 
   return (
     <button
-      onClick={() => navigate('/novo')}
+      onClick={() => navigate(destino)}
       aria-label="Novo lançamento"
       className="fixed bottom-20 left-1/2 -translate-x-1/2 z-20 w-14 h-14 rounded-full bg-accent-primary text-white shadow-lg flex items-center justify-center active:scale-95 transition-transform"
     >

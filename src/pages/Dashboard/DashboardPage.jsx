@@ -1,15 +1,19 @@
 import { useMemo } from 'react'
 import {
   PieChart, Pie, Cell,
-  BarChart, Bar, XAxis, YAxis, Tooltip,
+  BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
   ResponsiveContainer,
 } from 'recharts'
 import useLancamentos from '../../hooks/useLancamentos'
+import useConfig from '../../hooks/useConfig'
+import useCategorias from '../../hooks/useCategorias'
 import { getLancamentos } from '../../services/storage'
 import { formatarMoeda, formatarMesAno } from '../../utils/formatters'
-import { CATEGORIAS, iconeCategoria } from '../../constants/categories'
+import { iconeCategoria } from '../../constants/categories'
 
 const CORES = ['#6c63ff', '#00d4aa', '#ff4757', '#ffa502', '#2ed573', '#1e90ff', '#ff6b81', '#a29bfe']
+const COR_A = '#6c63ff'
+const COR_B = '#00d4aa'
 
 function dadosMesLocal(mes, ano) {
   return getLancamentos().filter(l => {
@@ -24,19 +28,24 @@ function DashboardPage() {
   const ano = now.getFullYear()
 
   const { lancamentos } = useLancamentos(mes, ano)
+  const { config } = useConfig()
+  const { categorias } = useCategorias()
+
+  const nomeA = config.nome_pessoa_a || 'Pessoa A'
+  const nomeB = config.nome_pessoa_b || 'Pessoa B'
 
   const gastosMes  = lancamentos.filter(l => l.tipo === 'gasto')
   const totalGastos = gastosMes.reduce((s, l) => s + l.valor, 0)
 
   const porCategoria = useMemo(() =>
-    CATEGORIAS
+    categorias
       .map(cat => ({
         id: cat.id, name: cat.label, icon: cat.icon,
         value: gastosMes.filter(l => l.categoria === cat.id).reduce((s, l) => s + l.valor, 0),
       }))
       .filter(c => c.value > 0)
       .sort((a, b) => b.value - a.value),
-  [gastosMes])
+  [gastosMes, categorias])
 
   const pessoas = [...new Set(gastosMes.map(l => l.quem_pagou).filter(Boolean))]
   const porPessoa = pessoas.map(p => ({
@@ -52,15 +61,15 @@ function DashboardPage() {
       const d = new Date(ano, mes - 1 - i, 1)
       const m = d.getMonth() + 1
       const a = d.getFullYear()
-      const doMes = dadosMesLocal(m, a)
+      const despesas = dadosMesLocal(m, a).filter(l => l.tipo === 'gasto')
       result.push({
         label: formatarMesAno(m, a).slice(0, 3),
-        gastos:   doMes.filter(l => l.tipo === 'gasto').reduce((s, l) => s + l.valor, 0),
-        receitas: doMes.filter(l => l.tipo === 'receita').reduce((s, l) => s + l.valor, 0),
+        [nomeA]: despesas.filter(l => l.quem_pagou === nomeA).reduce((s, l) => s + l.valor, 0),
+        [nomeB]: despesas.filter(l => l.quem_pagou === nomeB).reduce((s, l) => s + l.valor, 0),
       })
     }
     return result
-  }, [mes, ano])
+  }, [mes, ano, nomeA, nomeB])
 
   if (lancamentos.length === 0) {
     return (
@@ -135,7 +144,7 @@ function DashboardPage() {
         <section>
           <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">Maior gasto</h2>
           <div className="bg-bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-            <span className="text-3xl">{iconeCategoria(maiorGasto.categoria)}</span>
+            <span className="text-3xl">{iconeCategoria(maiorGasto.categoria, categorias)}</span>
             <div className="flex-1 min-w-0">
               <p className="text-text-primary font-medium text-sm truncate">
                 {maiorGasto.descricao || maiorGasto.categoria}
@@ -147,9 +156,9 @@ function DashboardPage() {
         </section>
       )}
 
-      {/* Evolução 6 meses */}
+      {/* Evolução 6 meses — despesas por pessoa */}
       <section>
-        <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-4">Últimos 6 meses</h2>
+        <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-4">Despesas por pessoa — últimos 6 meses</h2>
         <ResponsiveContainer width="100%" height={180}>
           <BarChart data={historico} margin={{ top: 0, right: 4, left: -20, bottom: 0 }} barCategoryGap="30%">
             <XAxis dataKey="label" tick={{ fill: '#8892b0', fontSize: 10 }}
@@ -158,13 +167,14 @@ function DashboardPage() {
               axisLine={false} tickLine={false}
               tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
             <Tooltip
-              formatter={(v, name) => [formatarMoeda(v), name === 'gastos' ? 'Gastos' : 'Receitas']}
+              formatter={v => formatarMoeda(v)}
               contentStyle={{ background: '#111827', border: '1px solid #1e2a45', borderRadius: 12, fontSize: 12 }}
               labelStyle={{ color: '#8892b0' }}
               cursor={{ fill: 'rgba(255,255,255,0.04)' }}
             />
-            <Bar dataKey="gastos"   fill="#ff4757" radius={[4, 4, 0, 0]} maxBarSize={20} />
-            <Bar dataKey="receitas" fill="#00d4aa" radius={[4, 4, 0, 0]} maxBarSize={20} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar dataKey={nomeA} fill={COR_A} radius={[4, 4, 0, 0]} maxBarSize={20} />
+            <Bar dataKey={nomeB} fill={COR_B} radius={[4, 4, 0, 0]} maxBarSize={20} />
           </BarChart>
         </ResponsiveContainer>
       </section>

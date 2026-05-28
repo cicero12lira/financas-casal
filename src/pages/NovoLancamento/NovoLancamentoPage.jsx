@@ -1,18 +1,25 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import useConfig from '../../hooks/useConfig'
 import useLancamentos from '../../hooks/useLancamentos'
+import usePessoal from '../../hooks/usePessoal'
+import useCategorias from '../../hooks/useCategorias'
 import Toast from '../../components/ui/Toast'
-import { CATEGORIAS } from '../../constants/categories'
 import { gerarUUID } from '../../utils/uuid'
-import { formatarMoeda } from '../../utils/formatters'
-import { adicionarLancamento } from '../../services/sheets'
+import { adicionarLancamento, adicionarPessoal } from '../../services/sheets'
+import { getUsuario } from '../../services/storage'
 
 function NovoLancamentoPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const escopo = searchParams.get('escopo') === 'pessoal' ? 'pessoal' : 'casal'
+  const ehPessoal = escopo === 'pessoal'
+
   const { config } = useConfig()
+  const { categorias } = useCategorias()
   const now = new Date()
-  const { adicionarLocal, atualizarLocal } = useLancamentos(now.getMonth() + 1, now.getFullYear())
+  const lancCasal = useLancamentos(now.getMonth() + 1, now.getFullYear())
+  const lancPessoal = usePessoal(now.getMonth() + 1, now.getFullYear())
 
   const [rawValor, setRawValor] = useState('')
   const [tipo, setTipo] = useState('gasto')
@@ -28,25 +35,46 @@ function NovoLancamentoPage() {
   const nomeB = config.nome_pessoa_b || 'Pessoa B'
 
   useEffect(() => {
-    if (!quemPagou) setQuemPagou(nomeA)
-  }, [nomeA, quemPagou])
-
-  useEffect(() => {
     inputRef.current?.focus()
   }, [])
 
   function handleValorInput(e) {
     const v = e.target.value
-    // permite dígitos, vírgula e ponto; máximo 2 casas decimais
     if (/^\d*([.,]\d{0,2})?$/.test(v)) setRawValor(v)
   }
 
   const valorNum = parseFloat(rawValor.replace(',', '.')) || 0
-  const podeSalvar = valorNum > 0 && categoria && quemPagou
+  const podeSalvar = valorNum > 0 && categoria && (ehPessoal || quemPagou)
 
   async function salvar() {
     if (!podeSalvar || salvando) return
     setSalvando(true)
+
+    if (ehPessoal) {
+      const usuario = getUsuario() || 'a'
+      const lancamento = {
+        id:           gerarUUID(),
+        data,
+        valor:        valorNum,
+        tipo,
+        categoria,
+        descricao:    descricao.trim(),
+        criado_em:    new Date().toISOString(),
+        origem:       'manual',
+        ref_casal_id: '',
+        sincronizado: false,
+      }
+      lancPessoal.adicionarLocal(lancamento)
+      if (navigator.onLine) {
+        adicionarPessoal(usuario, lancamento)
+          .then(() => lancPessoal.atualizarLocal(lancamento.id, { sincronizado: true }))
+          .catch(() => {})
+      }
+      setToast({ mensagem: 'Lançamento pessoal salvo!', tipo: 'sucesso' })
+      setSalvando(false)
+      setTimeout(() => navigate('/pessoal'), 1200)
+      return
+    }
 
     const lancamento = {
       id:          gerarUUID(),
@@ -59,16 +87,12 @@ function NovoLancamentoPage() {
       criado_em:   new Date().toISOString(),
       sincronizado: false,
     }
-
-    adicionarLocal(lancamento)
-
-    // Tenta sincronizar imediatamente; se falhar, fica na fila do useSync
+    lancCasal.adicionarLocal(lancamento)
     if (navigator.onLine) {
       adicionarLancamento(lancamento)
-        .then(() => atualizarLocal(lancamento.id, { sincronizado: true }))
+        .then(() => lancCasal.atualizarLocal(lancamento.id, { sincronizado: true }))
         .catch(() => {})
     }
-
     setToast({ mensagem: 'Lançamento salvo!', tipo: 'sucesso' })
     setSalvando(false)
     setTimeout(() => navigate('/'), 1200)
@@ -88,13 +112,11 @@ function NovoLancamentoPage() {
           </svg>
           Voltar
         </button>
-        <button
-          onClick={salvar}
-          disabled={!podeSalvar || salvando}
-          className="px-4 py-1.5 rounded-full bg-accent-primary text-white text-sm font-medium disabled:opacity-40 active:scale-95 transition-all"
-        >
-          {salvando ? 'Salvando...' : 'Salvar'}
-        </button>
+        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+          ehPessoal ? 'bg-accent-secondary/20 text-accent-secondary' : 'bg-accent-primary/20 text-accent-primary'
+        }`}>
+          {ehPessoal ? 'Pessoal' : 'Casal'}
+        </span>
       </div>
 
       <div className="px-4 pb-8 space-y-6">
@@ -139,7 +161,7 @@ function NovoLancamentoPage() {
         {/* Categoria */}
         <Section titulo="Categoria">
           <div className="grid grid-cols-4 gap-2">
-            {CATEGORIAS.map(cat => (
+            {categorias.map(cat => (
               <button
                 key={cat.id}
                 onClick={() => setCategoria(cat.id)}
@@ -156,24 +178,26 @@ function NovoLancamentoPage() {
           </div>
         </Section>
 
-        {/* Quem pagou */}
-        <Section titulo="Quem pagou">
-          <div className="flex gap-2">
-            {[nomeA, nomeB].map(nome => (
-              <button
-                key={nome}
-                onClick={() => setQuemPagou(nome)}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
-                  quemPagou === nome
-                    ? 'bg-accent-primary/20 border-accent-primary text-accent-primary'
-                    : 'bg-bg-card border-border text-text-secondary'
-                }`}
-              >
-                {nome}
-              </button>
-            ))}
-          </div>
-        </Section>
+        {/* Quem pagou — apenas no escopo casal */}
+        {!ehPessoal && (
+          <Section titulo="Quem pagou">
+            <div className="flex gap-2">
+              {[nomeA, nomeB].map(nome => (
+                <button
+                  key={nome}
+                  onClick={() => setQuemPagou(nome)}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
+                    quemPagou === nome
+                      ? 'bg-accent-primary/20 border-accent-primary text-accent-primary'
+                      : 'bg-bg-card border-border text-text-secondary'
+                  }`}
+                >
+                  {nome}
+                </button>
+              ))}
+            </div>
+          </Section>
+        )}
 
         {/* Detalhes */}
         <Section titulo="Detalhes (opcionais)">
@@ -204,6 +228,15 @@ function NovoLancamentoPage() {
             </div>
           </div>
         </Section>
+
+        {/* Salvar */}
+        <button
+          onClick={salvar}
+          disabled={!podeSalvar || salvando}
+          className="w-full py-3.5 rounded-2xl bg-accent-primary text-white text-base font-semibold disabled:opacity-40 active:scale-95 transition-all"
+        >
+          {salvando ? 'Salvando...' : 'Salvar'}
+        </button>
       </div>
 
       {toast && (

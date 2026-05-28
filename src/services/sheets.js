@@ -1,4 +1,7 @@
-import { getSheetsId, getSheetsToken } from './storage'
+import {
+  getSheetsId, getSheetsToken,
+  getPessoalCreds, getUsuario,
+} from './storage'
 
 export class SheetsError extends Error {
   constructor(message, tipo = 'desconhecido') {
@@ -8,10 +11,9 @@ export class SheetsError extends Error {
   }
 }
 
-// --- Autenticação via Service Account JWT ---
+// --- Autenticação via Service Account JWT (cache por client_email) ---
 
-let _tokenCache = null
-let _tokenExpiry = 0
+const _tokenCache = {} // client_email -> { token, expiry }
 
 function _base64url(str) {
   return btoa(str).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
@@ -50,11 +52,12 @@ async function _criarJWT(credentials) {
   return `${signingInput}.${_base64urlFromBuffer(sig)}`
 }
 
-async function _obterToken() {
-  if (_tokenCache && Date.now() < _tokenExpiry) return _tokenCache
-
-  const credentials = getSheetsToken()
+async function _obterToken(credentials) {
   if (!credentials) throw new SheetsError('Credenciais da Service Account não configuradas.', 'auth')
+
+  const chave = credentials.client_email
+  const cache = _tokenCache[chave]
+  if (cache && Date.now() < cache.expiry) return cache.token
 
   const jwt = await _criarJWT(credentials)
   let res
@@ -77,23 +80,29 @@ async function _obterToken() {
   }
 
   const { access_token, expires_in } = await res.json()
-  _tokenCache = access_token
-  _tokenExpiry = Date.now() + (expires_in - 60) * 1000
-  return _tokenCache
+  _tokenCache[chave] = { token: access_token, expiry: Date.now() + (expires_in - 60) * 1000 }
+  return access_token
 }
 
-// --- Helpers ---
+// --- Requisições (recebem contexto { id, token }) ---
 
-function _spreadsheetId() {
+function _ctxCasal() {
   const id = getSheetsId()
-  if (!id) throw new SheetsError('ID da planilha não configurado.', 'config')
-  return id
+  const token = getSheetsToken()
+  if (!id) throw new SheetsError('ID da planilha do casal não configurado.', 'config')
+  return { id, token }
 }
 
-async function _request(method, path, body) {
-  const token = await _obterToken()
-  const id = _spreadsheetId()
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${id}${path}`
+function _ctxPessoal(pessoa) {
+  const p = pessoa || getUsuario() || 'a'
+  const creds = getPessoalCreds(p)
+  if (!creds?.sheetsId) throw new SheetsError('Planilha pessoal não configurada.', 'config')
+  return { id: creds.sheetsId, token: creds.token }
+}
+
+async function _request(ctx, method, path, body) {
+  const token = await _obterToken(ctx.token)
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${ctx.id}${path}`
 
   let res
   try {
@@ -117,36 +126,37 @@ async function _request(method, path, body) {
   return res.status === 204 ? null : res.json()
 }
 
-async function _get(range) {
-  const data = await _request('GET', `/values/${encodeURIComponent(range)}`)
+async function _get(ctx, range) {
+  const data = await _request(ctx, 'GET', `/values/${encodeURIComponent(range)}`)
   return data.values ?? []
 }
 
-async function _append(range, values) {
-  await _request('POST', `/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, { values })
+async function _append(ctx, range, values) {
+  await _request(ctx, 'POST', `/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, { values })
 }
 
-async function _update(range, values) {
-  await _request('PUT', `/values/${encodeURIComponent(range)}?valueInputOption=RAW`, { values })
+async function _update(ctx, range, values) {
+  await _request(ctx, 'PUT', `/values/${encodeURIComponent(range)}?valueInputOption=RAW`, { values })
 }
 
-const _sheetIdCache = {}
+const _sheetIdCache = {} // `${ctx.id}:${nome}` -> sheetId numérico
 
-async function _getSheetId(sheetName) {
-  if (_sheetIdCache[sheetName] !== undefined) return _sheetIdCache[sheetName]
-  const data = await _request('GET', '?fields=sheets.properties')
+async function _getSheetId(ctx, sheetName) {
+  const chave = `${ctx.id}:${sheetName}`
+  if (_sheetIdCache[chave] !== undefined) return _sheetIdCache[chave]
+  const data = await _request(ctx, 'GET', '?fields=sheets.properties')
   for (const s of data.sheets ?? []) {
-    _sheetIdCache[s.properties.title] = s.properties.sheetId
+    _sheetIdCache[`${ctx.id}:${s.properties.title}`] = s.properties.sheetId
   }
-  if (_sheetIdCache[sheetName] === undefined) {
+  if (_sheetIdCache[chave] === undefined) {
     throw new SheetsError(`Aba "${sheetName}" não encontrada na planilha.`, 'desconhecido')
   }
-  return _sheetIdCache[sheetName]
+  return _sheetIdCache[chave]
 }
 
-async function _deleteRow(sheetName, sheetRowNum) {
-  const sheetId = await _getSheetId(sheetName)
-  await _request('POST', ':batchUpdate', {
+async function _deleteRow(ctx, sheetName, sheetRowNum) {
+  const sheetId = await _getSheetId(ctx, sheetName)
+  await _request(ctx, 'POST', ':batchUpdate', {
     requests: [{
       deleteDimension: {
         range: { sheetId, dimension: 'ROWS', startIndex: sheetRowNum - 1, endIndex: sheetRowNum },
@@ -155,7 +165,7 @@ async function _deleteRow(sheetName, sheetRowNum) {
   })
 }
 
-// --- Parsing ---
+// --- Parsing: lançamentos do casal (A:I) ---
 
 function _rowParaLancamento(row) {
   return {
@@ -175,10 +185,31 @@ function _lancamentoParaRow(l) {
   return [l.id, l.data, l.valor, l.tipo, l.categoria, l.quem_pagou, l.descricao ?? '', l.criado_em, 'true']
 }
 
-// --- API pública ---
+// --- Parsing: lançamentos pessoais (A:J) ---
+
+function _rowParaPessoal(row) {
+  return {
+    id:           row[0] ?? '',
+    data:         row[1] ?? '',
+    valor:        parseFloat(row[2]) || 0,
+    tipo:         row[3] ?? 'gasto',
+    categoria:    row[4] ?? '',
+    descricao:    row[5] ?? '',
+    criado_em:    row[6] ?? '',
+    origem:       row[7] ?? 'manual',
+    ref_casal_id: row[8] ?? '',
+    sincronizado: row[9] === 'true' || row[9] === true,
+  }
+}
+
+function _pessoalParaRow(l) {
+  return [l.id, l.data, l.valor, l.tipo, l.categoria, l.descricao ?? '', l.criado_em, l.origem ?? 'manual', l.ref_casal_id ?? '', 'true']
+}
+
+// --- API pública: CASAL ---
 
 async function buscarLancamentos(mes, ano) {
-  const rows = await _get('lancamentos!A:I')
+  const rows = await _get(_ctxCasal(), 'lancamentos!A:I')
   return rows
     .filter(row => row[0] && row[0] !== 'id')
     .map(_rowParaLancamento)
@@ -189,50 +220,95 @@ async function buscarLancamentos(mes, ano) {
 }
 
 async function adicionarLancamento(lancamento) {
-  await _append('lancamentos!A:I', [_lancamentoParaRow(lancamento)])
+  await _append(_ctxCasal(), 'lancamentos!A:I', [_lancamentoParaRow(lancamento)])
 }
 
 async function atualizarLancamento(id, dados) {
-  const rows = await _get('lancamentos!A:I')
+  const ctx = _ctxCasal()
+  const rows = await _get(ctx, 'lancamentos!A:I')
   const idx = rows.findIndex(row => row[0] === id)
   if (idx === -1) throw new SheetsError(`Lançamento ${id} não encontrado.`, 'desconhecido')
   const updated = { ..._rowParaLancamento(rows[idx]), ...dados }
-  await _update(`lancamentos!A${idx + 1}:I${idx + 1}`, [_lancamentoParaRow(updated)])
+  await _update(ctx, `lancamentos!A${idx + 1}:I${idx + 1}`, [_lancamentoParaRow(updated)])
 }
 
 async function removerLancamento(id) {
-  const rows = await _get('lancamentos!A:A')
+  const ctx = _ctxCasal()
+  const rows = await _get(ctx, 'lancamentos!A:A')
   const idx = rows.findIndex(row => row[0] === id)
   if (idx === -1) throw new SheetsError(`Lançamento ${id} não encontrado.`, 'desconhecido')
-  await _deleteRow('lancamentos', idx + 1)
+  await _deleteRow(ctx, 'lancamentos', idx + 1)
 }
 
 async function buscarConfig() {
-  const rows = await _get('config!A:B')
+  const rows = await _get(_ctxCasal(), 'config!A:B')
   return Object.fromEntries(
     rows.filter(([k]) => k && k !== 'chave').map(([k, v]) => [k, v ?? ''])
   )
 }
 
 async function salvarConfig(config) {
-  const rows = await _get('config!A:B')
+  const ctx = _ctxCasal()
+  const rows = await _get(ctx, 'config!A:B')
   const toAppend = []
-
   for (const [chave, valor] of Object.entries(config)) {
     const idx = rows.findIndex(row => row[0] === chave)
     if (idx === -1) {
       toAppend.push([chave, String(valor)])
     } else {
-      await _update(`config!A${idx + 1}:B${idx + 1}`, [[chave, String(valor)]])
+      await _update(ctx, `config!A${idx + 1}:B${idx + 1}`, [[chave, String(valor)]])
     }
   }
-
-  if (toAppend.length > 0) await _append('config!A:B', toAppend)
+  if (toAppend.length > 0) await _append(ctx, 'config!A:B', toAppend)
 }
 
 async function testarConexao() {
   try {
     await buscarConfig()
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, erro: err.message }
+  }
+}
+
+// --- API pública: PESSOAL (planilha da pessoa logada) ---
+
+async function buscarPessoal(pessoa, mes, ano) {
+  const rows = await _get(_ctxPessoal(pessoa), 'pessoal!A:J')
+  return rows
+    .filter(row => row[0] && row[0] !== 'id')
+    .map(_rowParaPessoal)
+    .filter(l => {
+      if (mes == null) return true
+      const [y, m] = (l.data ?? '').split('-').map(Number)
+      return y === ano && m === mes
+    })
+}
+
+async function adicionarPessoal(pessoa, lancamento) {
+  await _append(_ctxPessoal(pessoa), 'pessoal!A:J', [_pessoalParaRow(lancamento)])
+}
+
+async function atualizarPessoal(pessoa, id, dados) {
+  const ctx = _ctxPessoal(pessoa)
+  const rows = await _get(ctx, 'pessoal!A:J')
+  const idx = rows.findIndex(row => row[0] === id)
+  if (idx === -1) throw new SheetsError(`Lançamento pessoal ${id} não encontrado.`, 'desconhecido')
+  const updated = { ..._rowParaPessoal(rows[idx]), ...dados }
+  await _update(ctx, `pessoal!A${idx + 1}:J${idx + 1}`, [_pessoalParaRow(updated)])
+}
+
+async function removerPessoal(pessoa, id) {
+  const ctx = _ctxPessoal(pessoa)
+  const rows = await _get(ctx, 'pessoal!A:A')
+  const idx = rows.findIndex(row => row[0] === id)
+  if (idx === -1) throw new SheetsError(`Lançamento pessoal ${id} não encontrado.`, 'desconhecido')
+  await _deleteRow(ctx, 'pessoal', idx + 1)
+}
+
+async function testarConexaoPessoal(pessoa) {
+  try {
+    await buscarPessoal(pessoa, null, null)
     return { ok: true }
   } catch (err) {
     return { ok: false, erro: err.message }
@@ -247,4 +323,9 @@ export {
   buscarConfig,
   salvarConfig,
   testarConexao,
+  buscarPessoal,
+  adicionarPessoal,
+  atualizarPessoal,
+  removerPessoal,
+  testarConexaoPessoal,
 }

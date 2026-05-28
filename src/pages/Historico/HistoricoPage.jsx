@@ -1,8 +1,9 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useLancamentos from '../../hooks/useLancamentos'
+import useCategorias from '../../hooks/useCategorias'
 import { formatarMoeda, formatarData, formatarMesAno } from '../../utils/formatters'
-import { iconeCategoria, CATEGORIAS } from '../../constants/categories'
+import { iconeCategoria } from '../../constants/categories'
 import { removerLancamento } from '../../services/sheets'
 
 const FILTROS_TIPO = ['todos', 'gasto', 'receita']
@@ -16,6 +17,7 @@ function HistoricoPage() {
   const [filtroPessoa, setFiltroPessoa] = useState('todas')
 
   const { lancamentos, removerLocal } = useLancamentos(mes, ano)
+  const { categorias } = useCategorias()
   const navigate = useNavigate()
 
   function navMes(delta) {
@@ -89,7 +91,7 @@ function HistoricoPage() {
           className="text-xs bg-bg-card border border-border text-text-secondary rounded-full px-3 py-1 outline-none flex-shrink-0"
         >
           <option value="todas">Categoria</option>
-          {CATEGORIAS.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+          {categorias.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
         </select>
         {pessoas.length > 0 && (
           <select
@@ -115,6 +117,7 @@ function HistoricoPage() {
             <ItemSwipavel
               key={l.id}
               lancamento={l}
+              categorias={categorias}
               onEditar={() => navigate(`/novo?id=${l.id}`)}
               onExcluir={() => excluir(l)}
             />
@@ -125,7 +128,7 @@ function HistoricoPage() {
   )
 }
 
-function ItemSwipavel({ lancamento, onEditar, onExcluir }) {
+function ItemSwipavel({ lancamento, categorias, onEditar, onExcluir }) {
   const [offsetX, setOffsetX] = useState(0)
   const [mostrarAcoes, setMostrarAcoes] = useState(false)
   const startX = useRef(0)
@@ -175,7 +178,7 @@ function ItemSwipavel({ lancamento, onEditar, onExcluir }) {
         onTouchEnd={onTouchEnd}
         onClick={mostrarAcoes ? fechar : undefined}
       >
-        <span className="text-xl w-8 text-center">{iconeCategoria(categoria)}</span>
+        <span className="text-xl w-8 text-center">{iconeCategoria(categoria, categorias)}</span>
         <div className="flex-1 min-w-0">
           <p className="text-text-primary text-sm font-medium truncate">{descricao || categoria}</p>
           <p className="text-text-secondary text-xs">{quem_pagou} · {formatarData(data + 'T00:00:00')}</p>

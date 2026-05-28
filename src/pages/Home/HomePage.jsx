@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import useLancamentos from '../../hooks/useLancamentos'
 import useConfig from '../../hooks/useConfig'
+import useCategorias from '../../hooks/useCategorias'
 import { formatarMoeda, formatarDataCurta } from '../../utils/formatters'
 import { iconeCategoria } from '../../constants/categories'
 
@@ -11,6 +12,7 @@ function HomePage() {
 
   const { lancamentos, carregando, erro, sincronizar } = useLancamentos(mes, ano)
   const { config } = useConfig()
+  const { categorias } = useCategorias()
 
   const totalGastos   = lancamentos.filter(l => l.tipo === 'gasto').reduce((s, l) => s + l.valor, 0)
   const totalReceitas = lancamentos.filter(l => l.tipo === 'receita').reduce((s, l) => s + l.valor, 0)
@@ -98,18 +100,18 @@ function HomePage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {ultimos5.map(l => <ItemLancamento key={l.id} lancamento={l} />)}
+          {ultimos5.map(l => <ItemLancamento key={l.id} lancamento={l} categorias={categorias} />)}
         </div>
       )}
     </div>
   )
 }
 
-function ItemLancamento({ lancamento }) {
+function ItemLancamento({ lancamento, categorias }) {
   const { descricao, categoria, valor, tipo, quem_pagou, data, sincronizado } = lancamento
   return (
     <div className="flex items-center gap-3 bg-bg-card rounded-xl border border-border px-4 py-3 animate-fade-in">
-      <span className="text-xl w-8 text-center">{iconeCategoria(categoria)}</span>
+      <span className="text-xl w-8 text-center">{iconeCategoria(categoria, categorias)}</span>
       <div className="flex-1 min-w-0">
         <p className="text-text-primary text-sm font-medium truncate">{descricao || categoria}</p>
         <p className="text-text-secondary text-xs">{quem_pagou} · {formatarDataCurta(data + 'T00:00:00')}</p>

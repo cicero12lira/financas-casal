@@ -1,12 +1,14 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import usePin from '../../hooks/usePin'
-import { getPinHash } from '../../services/storage'
+import { temAlgumPin } from '../../services/storage'
 
 const TITULOS = {
-  criar:    'Crie seu PIN de 4 dígitos',
-  confirmar:'Confirme seu PIN',
-  validar:  'Digite seu PIN',
+  criar_a:     'Crie o PIN da Pessoa A',
+  confirmar_a: 'Confirme o PIN da Pessoa A',
+  criar_b:     'Crie o PIN da Pessoa B',
+  confirmar_b: 'Confirme o PIN da Pessoa B',
+  validar:     'Digite seu PIN',
 }
 
 const TECLAS = ['1','2','3','4','5','6','7','8','9','','0','⌫']
@@ -17,7 +19,7 @@ function PinPage() {
 
   useEffect(() => {
     const sessionAtiva = sessionStorage.getItem('fc_session') === 'true'
-    if (sessionAtiva && getPinHash()) navigate('/', { replace: true })
+    if (sessionAtiva && temAlgumPin()) navigate('/', { replace: true })
   }, [navigate])
 
   useEffect(() => {

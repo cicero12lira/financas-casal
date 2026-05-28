@@ -3,7 +3,10 @@ dist
 .claude/
 scripts/setup.mjs
 scripts/teste-conexao.mjs
+scripts/teste-escrita.mjs
 scripts/tour.mjs
+scripts/verify-fase1.mjs
+scripts/verify-fase2.mjs
 dist-ssr
 *.local
 

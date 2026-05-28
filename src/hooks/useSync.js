@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { getLancamentos, setLancamentos, setUltimaSync } from '../services/storage'
+import { getLancamentos, setLancamentos, setUltimaSync, getUsuario, getConfig } from '../services/storage'
 import { adicionarLancamento } from '../services/sheets'
+import { sincronizarPessoalPendentes, reconciliarPessoal } from '../services/pessoal'
 
 function useSync() {
   const sincronizando = useRef(false)
@@ -9,12 +10,8 @@ function useSync() {
     if (sincronizando.current || !navigator.onLine) return
     sincronizando.current = true
 
+    // Fila do casal
     const pendentes = getLancamentos().filter(l => !l.sincronizado)
-    if (pendentes.length === 0) {
-      sincronizando.current = false
-      return
-    }
-
     for (const lancamento of pendentes) {
       try {
         await adicionarLancamento(lancamento)
@@ -27,14 +24,27 @@ function useSync() {
       }
     }
 
+    // Controle pessoal do usuário logado: reconcilia despesas do casal e envia pendentes
+    const usuario = getUsuario()
+    if (usuario) {
+      const config = getConfig()
+      const nome = usuario === 'b'
+        ? (config.nome_pessoa_b || 'Pessoa B')
+        : (config.nome_pessoa_a || 'Pessoa A')
+      try {
+        await reconciliarPessoal({ usuario, nome })
+        await sincronizarPessoalPendentes(usuario)
+      } catch {
+        // tenta no próximo ciclo
+      }
+    }
+
     setUltimaSync(new Date().toISOString())
     sincronizando.current = false
   }, [])
 
   useEffect(() => {
-    // Tenta ao montar (pode já estar online)
     processarFila()
-
     window.addEventListener('online', processarFila)
     return () => window.removeEventListener('online', processarFila)
   }, [processarFila])
