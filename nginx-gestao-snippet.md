@@ -43,13 +43,14 @@ nano /opt/gestao/nginx.conf
 # 3. VALIDAR a sintaxe DENTRO do container (não recarregue se falhar!)
 docker exec gestao_nginx nginx -t
 
-# 4. Recarregar SÓ o nginx (não recria os outros containers)
-cd /opt/gestao
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-deps nginx
+# 4. Recarregar o nginx — use nginx -s reload (determinístico).
+#    ATENÇÃO: `docker compose up -d --no-deps nginx` NÃO recarrega quando só o
+#    arquivo montado mudou (mostra "Running" e mantém a config antiga em memória).
+docker exec gestao_nginx nginx -s reload
 
 # 5. Se algo der errado: restaurar o backup e recarregar
 # cp /opt/gestao/nginx.conf.bak.<data> /opt/gestao/nginx.conf
-# docker exec gestao_nginx nginx -t && docker compose ... up -d --no-deps nginx
+# docker exec gestao_nginx nginx -t && docker exec gestao_nginx nginx -s reload
 ```
 
 ## Verificação
