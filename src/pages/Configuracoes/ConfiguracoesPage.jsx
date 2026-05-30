@@ -1,13 +1,13 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import useConfig from '../../hooks/useConfig'
 import useLancamentos from '../../hooks/useLancamentos'
 import useCategorias from '../../hooks/useCategorias'
+import useAuth from '../../hooks/useAuth'
+import useUsuario from '../../hooks/useUsuario'
 import Toast from '../../components/ui/Toast'
 import { formatarMesAno } from '../../utils/formatters'
-import { getSheetsId, setSheetsId, getSheetsToken, setSheetsToken, removeSheetsToken, getPinHash, setPinHash, getUsuario, getPessoalCreds, setPessoalCreds, removePessoalCreds, getLancamentos, setLancamentos as saveLancamentos } from '../../services/storage'
-import { testarConexao, testarConexaoPessoal, adicionarLancamento } from '../../services/sheets'
-import { hashPin } from '../../utils/crypto'
-import useUsuario from '../../hooks/useUsuario'
+import { getAuth } from '../../services/storage'
 
 function ConfiguracoesPage() {
   const now = new Date()
@@ -25,14 +25,13 @@ function ConfiguracoesPage() {
       <div className="bg-accent-primary/10 border border-accent-primary/30 rounded-2xl px-4 py-3">
         <p className="text-xs text-text-secondary">Conectado como</p>
         <p className="text-text-primary font-semibold">{nome}</p>
+        {getAuth()?.email && <p className="text-text-secondary text-xs mt-0.5">{getAuth().email}</p>}
       </div>
 
       <SecaoPerfil config={config} atualizar={atualizar} onSalvo={() => showToast('Perfil salvo!')} />
       <SecaoOrcamento config={config} atualizar={atualizar} onSalvo={() => showToast('Orçamento salvo!')} />
-      <SecaoSeguranca onSalvo={() => showToast('PIN alterado com sucesso!')} onErro={msg => showToast(msg, 'erro')} />
-      <SecaoPlanilhaPessoal onSalvo={msg => showToast(msg)} onErro={msg => showToast(msg, 'erro')} />
+      <SecaoConta config={config} atualizar={atualizar} onSalvo={msg => showToast(msg)} />
       <SecaoCategorias onSalvo={msg => showToast(msg)} onErro={msg => showToast(msg, 'erro')} />
-      <SecaoSheets onSalvo={msg => showToast(msg)} onErro={msg => showToast(msg, 'erro')} />
       <SecaoDados lancamentos={lancamentos} mes={now.getMonth() + 1} ano={now.getFullYear()} onSalvo={msg => showToast(msg)} />
     </div>
   )
@@ -52,12 +51,10 @@ function SecaoPerfil({ config, atualizar, onSalvo }) {
   return (
     <Secao titulo="Perfil do casal">
       <Campo label="Pessoa A">
-        <input value={nomeA} onChange={e => setNomeA(e.target.value)} placeholder="Nome da Pessoa A"
-          className={inputCls} />
+        <input value={nomeA} onChange={e => setNomeA(e.target.value)} placeholder="Nome da Pessoa A" className={inputCls} />
       </Campo>
       <Campo label="Pessoa B">
-        <input value={nomeB} onChange={e => setNomeB(e.target.value)} placeholder="Nome da Pessoa B"
-          className={inputCls} />
+        <input value={nomeB} onChange={e => setNomeB(e.target.value)} placeholder="Nome da Pessoa B" className={inputCls} />
       </Campo>
       <BotaoSalvar onClick={salvar} />
     </Secao>
@@ -79,233 +76,51 @@ function SecaoOrcamento({ config, atualizar, onSalvo }) {
     <Secao titulo="Orçamento">
       <Campo label="Orçamento mensal (R$)">
         <input type="text" inputMode="decimal" value={orcamento}
-          onChange={e => setOrcamento(e.target.value)} placeholder="Ex: 5000"
-          className={inputCls} />
+          onChange={e => setOrcamento(e.target.value)} placeholder="Ex: 5000" className={inputCls} />
       </Campo>
       <BotaoSalvar onClick={salvar} />
     </Secao>
   )
 }
 
-// --- Segurança / Alterar PIN ---
+// --- Conta (e-mails + logout) ---
 
-function SecaoSeguranca({ onSalvo, onErro }) {
-  const [etapa, setEtapa] = useState('atual') // 'atual' | 'novo' | 'confirmar'
-  const [pinAtual, setPinAtual] = useState('')
-  const [pinNovo, setPinNovo] = useState('')
-  const [pinConfirmar, setPinConfirmar] = useState('')
-  const [carregando, setCarregando] = useState(false)
-  const [expandido, setExpandido] = useState(false)
+function SecaoConta({ config, atualizar, onSalvo }) {
+  const navigate = useNavigate()
+  const { logout } = useAuth()
+  const [emailA, setEmailA] = useState(config.email_pessoa_a ?? '')
+  const [emailB, setEmailB] = useState(config.email_pessoa_b ?? '')
 
-  function reset() {
-    setEtapa('atual'); setPinAtual(''); setPinNovo(''); setPinConfirmar('')
-    setExpandido(false)
+  async function salvarEmails() {
+    await atualizar({ email_pessoa_a: emailA.trim(), email_pessoa_b: emailB.trim() })
+    onSalvo('E-mails salvos!')
   }
 
-  const usuario = getUsuario() || 'a'
-
-  async function validarAtual() {
-    if (pinAtual.length !== 4) return onErro('Digite 4 dígitos.')
-    setCarregando(true)
-    const hash = await hashPin(pinAtual)
-    setCarregando(false)
-    if (hash !== getPinHash(usuario)) return onErro('PIN atual incorreto.')
-    setEtapa('novo')
-  }
-
-  async function salvar() {
-    if (pinNovo.length !== 4) return onErro('Novo PIN deve ter 4 dígitos.')
-    if (pinNovo !== pinConfirmar) return onErro('PINs não coincidem.')
-    setCarregando(true)
-    const hash = await hashPin(pinNovo)
-    setPinHash(usuario, hash)
-    setCarregando(false)
-    reset()
-    onSalvo()
-  }
-
-  // PIN da outra pessoa
-  const outro = usuario === 'a' ? 'b' : 'a'
-  const outroConfigurado = !!getPinHash(outro)
-  const [expOutro, setExpOutro] = useState(false)
-  const [pinO1, setPinO1] = useState('')
-  const [pinO2, setPinO2] = useState('')
-
-  async function salvarOutro() {
-    if (pinO1.length !== 4) return onErro('O PIN deve ter 4 dígitos.')
-    if (pinO1 !== pinO2) return onErro('PINs não coincidem.')
-    if (await hashPin(pinO1) === getPinHash(usuario)) return onErro('Deve ser diferente do seu PIN.')
-    setPinHash(outro, await hashPin(pinO1))
-    setExpOutro(false); setPinO1(''); setPinO2('')
-    onSalvo('PIN da outra pessoa salvo!')
+  async function sair() {
+    await logout()
+    navigate('/login', { replace: true })
   }
 
   return (
-    <Secao titulo="Segurança">
-      {!expandido ? (
-        <button onClick={() => setExpandido(true)}
-          className="text-sm text-accent-primary active:opacity-70 transition-opacity">
-          Alterar PIN →
-        </button>
-      ) : (
-        <div className="space-y-3">
-          {etapa === 'atual' && (
-            <>
-              <Campo label="PIN atual">
-                <input type="password" inputMode="numeric" maxLength={4} value={pinAtual}
-                  onChange={e => setPinAtual(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="••••" className={inputCls} />
-              </Campo>
-              <div className="flex gap-2">
-                <button onClick={reset} className={btnSecCls}>Cancelar</button>
-                <button onClick={validarAtual} disabled={carregando} className={btnPrimCls}>
-                  {carregando ? 'Verificando...' : 'Próximo'}
-                </button>
-              </div>
-            </>
-          )}
-          {etapa === 'novo' && (
-            <>
-              <Campo label="Novo PIN">
-                <input type="password" inputMode="numeric" maxLength={4} value={pinNovo}
-                  onChange={e => setPinNovo(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="••••" className={inputCls} />
-              </Campo>
-              <Campo label="Confirmar novo PIN">
-                <input type="password" inputMode="numeric" maxLength={4} value={pinConfirmar}
-                  onChange={e => setPinConfirmar(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="••••" className={inputCls} />
-              </Campo>
-              <div className="flex gap-2">
-                <button onClick={reset} className={btnSecCls}>Cancelar</button>
-                <button onClick={salvar} disabled={carregando} className={btnPrimCls}>
-                  {carregando ? 'Salvando...' : 'Salvar PIN'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* PIN da outra pessoa */}
-      <div className="pt-3 border-t border-border">
-        {!expOutro ? (
-          <button onClick={() => setExpOutro(true)}
-            className="text-sm text-accent-primary active:opacity-70 transition-opacity">
-            {outroConfigurado ? 'Alterar PIN da outra pessoa →' : 'Definir PIN da outra pessoa →'}
-          </button>
-        ) : (
-          <div className="space-y-3">
-            <Campo label="PIN da outra pessoa">
-              <input type="password" inputMode="numeric" maxLength={4} value={pinO1}
-                onChange={e => setPinO1(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                placeholder="••••" className={inputCls} />
-            </Campo>
-            <Campo label="Confirmar PIN">
-              <input type="password" inputMode="numeric" maxLength={4} value={pinO2}
-                onChange={e => setPinO2(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                placeholder="••••" className={inputCls} />
-            </Campo>
-            <div className="flex gap-2">
-              <button onClick={() => { setExpOutro(false); setPinO1(''); setPinO2('') }} className={btnSecCls}>Cancelar</button>
-              <button onClick={salvarOutro} className={btnPrimCls}>Salvar</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </Secao>
-  )
-}
-
-// --- Planilha pessoal (separação real, por pessoa) ---
-
-function SecaoPlanilhaPessoal({ onSalvo, onErro }) {
-  const usuario = getUsuario() || 'a'
-  const creds = getPessoalCreds(usuario)
-  const [sheetsId, setLocalId] = useState(creds?.sheetsId ?? '')
-  const [credText, setCredText] = useState('')
-  const [status, setStatus] = useState(null)
-  const [statusMsg, setStatusMsg] = useState('')
-  const [testando, setTestando] = useState(false)
-  const temToken = !!creds?.token
-
-  function salvarId() {
-    const atual = getPessoalCreds(usuario) || {}
-    setPessoalCreds(usuario, { ...atual, sheetsId: sheetsId.trim() })
-    onSalvo('ID da planilha pessoal salvo!')
-  }
-
-  function salvarCred() {
-    try {
-      const json = JSON.parse(credText)
-      if (!json.client_email || !json.private_key) throw new Error()
-      const atual = getPessoalCreds(usuario) || {}
-      setPessoalCreds(usuario, { ...atual, token: json })
-      setCredText('')
-      onSalvo('Credenciais pessoais salvas!')
-    } catch {
-      onErro('JSON inválido. Cole o conteúdo completo da Service Account.')
-    }
-  }
-
-  function removerCred() {
-    const atual = getPessoalCreds(usuario) || {}
-    const { token, ...resto } = atual
-    setPessoalCreds(usuario, resto)
-    setStatus(null)
-    onSalvo('Credenciais pessoais removidas.')
-  }
-
-  async function testar() {
-    setTestando(true)
-    const { ok, erro } = await testarConexaoPessoal(usuario)
-    setStatus(ok ? 'ok' : 'erro')
-    setStatusMsg(ok ? 'Conexão estabelecida!' : (erro ?? 'Erro desconhecido.'))
-    setTestando(false)
-  }
-
-  return (
-    <Secao titulo="Planilha pessoal">
+    <Secao titulo="Conta">
       <p className="text-xs text-text-secondary -mt-1">
-        Seus dados pessoais ficam numa planilha sua, separada do seu parceiro(a).
+        O login usa sua conta Google. Cada e-mail é mapeado para uma pessoa do casal.
       </p>
-      <Campo label="ID da sua planilha pessoal">
-        <input value={sheetsId} onChange={e => setLocalId(e.target.value)}
-          placeholder="Cole o ID aqui" className={inputCls} />
+      <Campo label="E-mail da Pessoa A">
+        <input type="email" value={emailA} onChange={e => setEmailA(e.target.value)}
+          placeholder="pessoa.a@gmail.com" className={inputCls} />
       </Campo>
-      <BotaoSalvar label="Salvar ID" onClick={salvarId} />
+      <Campo label="E-mail da Pessoa B">
+        <input type="email" value={emailB} onChange={e => setEmailB(e.target.value)}
+          placeholder="pessoa.b@gmail.com" className={inputCls} />
+      </Campo>
+      <BotaoSalvar label="Salvar e-mails" onClick={salvarEmails} />
 
-      <div className="mt-4">
-        <p className="text-xs text-text-secondary mb-2">
-          Credenciais: {' '}
-          {temToken ? <span className="text-accent-secondary">✓ Configuradas</span> : <span className="text-danger">✕ Não configuradas</span>}
-        </p>
-        {!temToken ? (
-          <>
-            <textarea value={credText} onChange={e => setCredText(e.target.value)}
-              placeholder="Cole o JSON da Service Account pessoal..." rows={4}
-              className={`${inputCls} font-mono text-xs resize-none`} />
-            <BotaoSalvar label="Salvar credenciais" onClick={salvarCred} />
-          </>
-        ) : (
-          <button onClick={removerCred} className="text-xs text-danger active:opacity-70 transition-opacity">
-            Remover credenciais
-          </button>
-        )}
+      <div className="pt-3 border-t border-border">
+        <button onClick={sair} className="text-sm text-danger active:opacity-70 transition-opacity">
+          Sair da conta →
+        </button>
       </div>
-
-      {creds?.sheetsId && temToken && (
-        <div className="mt-3 flex items-center gap-3">
-          <button onClick={testar} disabled={testando} className={`${btnPrimCls} flex-1`}>
-            {testando ? 'Testando...' : 'Testar conexão'}
-          </button>
-          {status && (
-            <span className={`text-xs ${status === 'ok' ? 'text-accent-secondary' : 'text-danger'}`}>
-              {status === 'ok' ? '✓' : '✕'} {statusMsg}
-            </span>
-          )}
-        </div>
-      )}
     </Secao>
   )
 }
@@ -362,7 +177,6 @@ function SecaoCategorias({ onSalvo, onErro }) {
         ))}
       </div>
 
-      {/* Adicionar nova */}
       <div className="flex gap-2 pt-1">
         <input
           value={novoIcon}
@@ -405,118 +219,9 @@ function EditorCategoria({ inicial, onSalvar, onCancelar }) {
   )
 }
 
-// --- Google Sheets ---
-
-function SecaoSheets({ onSalvo, onErro }) {
-  const [sheetsId, setSheetsIdLocal] = useState(() => getSheetsId() ?? '')
-  const [credenciais, setCredenciais] = useState('')
-  const [status, setStatus] = useState(null) // null | 'ok' | 'erro'
-  const [statusMsg, setStatusMsg] = useState('')
-  const [testando, setTestando] = useState(false)
-  const temToken = !!getSheetsToken()
-
-  function salvarId() {
-    setSheetsId(sheetsId.trim())
-    onSalvo('ID da planilha salvo!')
-  }
-
-  function salvarCredenciais() {
-    try {
-      const json = JSON.parse(credenciais)
-      if (!json.client_email || !json.private_key) throw new Error()
-      setSheetsToken(json)
-      setCredenciais('')
-      onSalvo('Credenciais salvas!')
-    } catch {
-      onErro('JSON inválido. Cole o conteúdo completo do arquivo da Service Account.')
-    }
-  }
-
-  function removerCredenciais() {
-    removeSheetsToken()
-    setStatus(null)
-    onSalvo('Credenciais removidas.')
-  }
-
-  async function testar() {
-    setTestando(true)
-    const { ok, erro } = await testarConexao()
-    setStatus(ok ? 'ok' : 'erro')
-    setStatusMsg(ok ? 'Conexão estabelecida com sucesso!' : (erro ?? 'Erro desconhecido.'))
-    setTestando(false)
-  }
-
-  return (
-    <Secao titulo="Google Sheets">
-      <Campo label="ID da planilha">
-        <input value={sheetsId} onChange={e => setSheetsIdLocal(e.target.value)}
-          placeholder="Cole o ID da planilha aqui"
-          className={inputCls} />
-      </Campo>
-      <BotaoSalvar label="Salvar ID" onClick={salvarId} />
-
-      <div className="mt-4">
-        <p className="text-xs text-text-secondary mb-2">
-          Credenciais da Service Account: {' '}
-          {temToken ? <span className="text-accent-secondary">✓ Configuradas</span> : <span className="text-danger">✕ Não configuradas</span>}
-        </p>
-        {!temToken ? (
-          <>
-            <textarea
-              value={credenciais}
-              onChange={e => setCredenciais(e.target.value)}
-              placeholder='Cole o JSON da Service Account aqui...'
-              rows={4}
-              className={`${inputCls} font-mono text-xs resize-none`}
-            />
-            <BotaoSalvar label="Salvar credenciais" onClick={salvarCredenciais} />
-          </>
-        ) : (
-          <button onClick={removerCredenciais}
-            className="text-xs text-danger active:opacity-70 transition-opacity">
-            Remover credenciais
-          </button>
-        )}
-      </div>
-
-      {getSheetsId() && temToken && (
-        <div className="mt-3 flex items-center gap-3">
-          <button onClick={testar} disabled={testando}
-            className={`${btnPrimCls} flex-1`}>
-            {testando ? 'Testando...' : 'Testar conexão'}
-          </button>
-          {status && (
-            <span className={`text-xs ${status === 'ok' ? 'text-accent-secondary' : 'text-danger'}`}>
-              {status === 'ok' ? '✓' : '✕'} {statusMsg}
-            </span>
-          )}
-        </div>
-      )}
-    </Secao>
-  )
-}
-
 // --- Dados ---
 
 function SecaoDados({ lancamentos, mes, ano, onSalvo }) {
-  const [sincronizando, setSincronizando] = useState(false)
-
-  async function sincronizarAgora() {
-    setSincronizando(true)
-    const pendentes = getLancamentos().filter(l => !l.sincronizado)
-    let ok = 0
-    for (const l of pendentes) {
-      try {
-        await adicionarLancamento(l)
-        const todos = getLancamentos().map(x => x.id === l.id ? { ...x, sincronizado: true } : x)
-        saveLancamentos(todos)
-        ok++
-      } catch {}
-    }
-    setSincronizando(false)
-    onSalvo(ok > 0 ? `${ok} lançamento(s) sincronizado(s)!` : 'Nada para sincronizar.')
-  }
-
   function exportarCSV() {
     const header = 'id,data,valor,tipo,categoria,quem_pagou,descricao,criado_em'
     const linhas = lancamentos.map(l =>
@@ -538,14 +243,12 @@ function SecaoDados({ lancamentos, mes, ano, onSalvo }) {
 
   return (
     <Secao titulo="Dados">
-      <div className="flex gap-2">
-        <button onClick={exportarCSV} className={`${btnSecCls} flex-1 text-sm`}>
-          📥 Exportar CSV
-        </button>
-        <button onClick={sincronizarAgora} disabled={sincronizando} className={`${btnPrimCls} flex-1 text-sm`}>
-          {sincronizando ? 'Sincronizando...' : '🔄 Sincronizar'}
-        </button>
-      </div>
+      <p className="text-xs text-text-secondary -mt-1">
+        Os dados sincronizam automaticamente entre os aparelhos (e funcionam offline).
+      </p>
+      <button onClick={exportarCSV} className={`${btnSecCls} w-full text-sm`}>
+        📥 Exportar CSV do mês
+      </button>
     </Secao>
   )
 }

@@ -3,7 +3,13 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
-  base: '/financas-casal/',
+  base: '/',
+  // Em dev, encaminha /api para um backend local (rode: cd backend && uvicorn main:app --port 8000)
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8000',
+    },
+  },
   build: {
     rollupOptions: {
       output: {

@@ -1,70 +1,59 @@
-import { useState, useEffect, useCallback } from 'react'
-import { getLancamentos, setLancamentos as saveLancamentos } from '../services/storage'
-import { buscarLancamentos } from '../services/sheets'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { estaLogado } from '../services/storage'
+import {
+  assinarLancamentos, buscarLancamentos,
+  adicionarLancamento, atualizarLancamento, removerLancamento,
+} from '../services/dados'
 
 function _doMes(lancamento, mes, ano) {
   const [y, m] = (lancamento.data || '').split('-').map(Number)
   return y === ano && m === mes
 }
 
-function _carregarLocal(mes, ano) {
-  return getLancamentos().filter(l => _doMes(l, mes, ano))
-}
-
+// Lançamentos do casal. Faz polling do backend (~15s). `todos` traz todos os
+// meses; `lancamentos`, só o mês pedido.
 function useLancamentos(mes, ano) {
-  const [lancamentos, setLocal] = useState(() => _carregarLocal(mes, ano))
-  const [carregando, setCarregando] = useState(false)
-  const [erro, setErro] = useState(null)
+  const [todos, setTodos] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  const [erro] = useState(null)
 
-  // Recarrega do localStorage quando o mês/ano muda
   useEffect(() => {
-    setLocal(_carregarLocal(mes, ano))
-  }, [mes, ano])
+    if (!estaLogado()) { setCarregando(false); return }
+    const unsub = assinarLancamentos(lista => {
+      setTodos(lista)
+      setCarregando(false)
+    })
+    return unsub
+  }, [])
+
+  const lancamentos = useMemo(() => todos.filter(l => _doMes(l, mes, ano)), [todos, mes, ano])
+  const pendentes = 0 // sem fila offline: escritas confirmam no servidor
 
   const sincronizar = useCallback(async () => {
-    if (!navigator.onLine) return
-    setCarregando(true)
-    setErro(null)
-    try {
-      const remotos = await buscarLancamentos(mes, ano)
+    try { setTodos(await buscarLancamentos()) } catch { /* offline */ }
+  }, [])
 
-      const todos = getLancamentos()
-      const outrosMeses = todos.filter(l => !_doMes(l, mes, ano))
-      const pendentes = todos.filter(l => _doMes(l, mes, ano) && !l.sincronizado)
-      const somentePendentes = pendentes.filter(p => !remotos.find(r => r.id === p.id))
+  // Escrita otimista: aplica local na hora e confirma no servidor.
+  const adicionar = useCallback((l) => {
+    setTodos(prev => [...prev, { ...l, sincronizado: true }])
+    adicionarLancamento(l).catch(() => {})
+  }, [])
 
-      const mesAtualizado = [...remotos, ...somentePendentes]
-      saveLancamentos([...outrosMeses, ...mesAtualizado])
-      setLocal(mesAtualizado)
-    } catch (err) {
-      setErro(err.message)
-    } finally {
-      setCarregando(false)
-    }
-  }, [mes, ano])
+  const atualizar = useCallback((id, dados) => {
+    setTodos(prev => prev.map(l => l.id === id ? { ...l, ...dados } : l))
+    atualizarLancamento(id, dados).catch(() => {})
+  }, [])
 
-  useEffect(() => { sincronizar() }, [sincronizar])
+  const remover = useCallback((id) => {
+    setTodos(prev => prev.filter(l => l.id !== id))
+    removerLancamento(id).catch(() => {})
+  }, [])
 
-  function adicionarLocal(lancamento) {
-    const todos = getLancamentos()
-    saveLancamentos([...todos, lancamento])
-    setLocal(prev => [...prev, lancamento])
+  return {
+    lancamentos, todos, carregando, erro, pendentes, sincronizar,
+    adicionar, atualizar, remover,
+    adicionarLocal: adicionar, atualizarLocal: atualizar, removerLocal: remover,
   }
-
-  function atualizarLocal(id, dados) {
-    const todos = getLancamentos().map(l => l.id === id ? { ...l, ...dados } : l)
-    saveLancamentos(todos)
-    setLocal(prev => prev.map(l => l.id === id ? { ...l, ...dados } : l))
-  }
-
-  function removerLocal(id) {
-    saveLancamentos(getLancamentos().filter(l => l.id !== id))
-    setLocal(prev => prev.filter(l => l.id !== id))
-  }
-
-  const pendentes = lancamentos.filter(l => !l.sincronizado).length
-
-  return { lancamentos, carregando, erro, pendentes, sincronizar, adicionarLocal, atualizarLocal, removerLocal }
 }
 
 export default useLancamentos

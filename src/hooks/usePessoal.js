@@ -1,76 +1,59 @@
-import { useState, useEffect, useCallback } from 'react'
-import { getLancamentosPessoal, setLancamentosPessoal, getUsuario, getPessoalCreds } from '../services/storage'
-import { buscarPessoal } from '../services/sheets'
-import { sincronizarPessoalPendentes, reconciliarPessoal } from '../services/pessoal'
-import useUsuario from './useUsuario'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { estaLogado } from '../services/storage'
+import {
+  assinarPessoal, buscarPessoal,
+  adicionarPessoal, atualizarPessoal, removerPessoal,
+} from '../services/dados'
 
 function _doMes(l, mes, ano) {
   const [y, m] = (l.data || '').split('-').map(Number)
   return y === ano && m === mes
 }
 
+// Lançamentos pessoais do usuário logado (isolados no backend por usuário).
 function usePessoal(mes, ano) {
-  const { nome } = useUsuario()
-  const usuario = getUsuario() || 'a'
-  const temCreds = !!getPessoalCreds(usuario)?.sheetsId
+  const temCreds = estaLogado()
+  const [todos, setTodos] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  const [erro] = useState(null)
 
-  const carregarLocal = useCallback(
-    () => getLancamentosPessoal(usuario).filter(l => _doMes(l, mes, ano)),
-    [usuario, mes, ano],
-  )
+  useEffect(() => {
+    if (!temCreds) { setCarregando(false); return }
+    const unsub = assinarPessoal(lista => {
+      setTodos(lista)
+      setCarregando(false)
+    })
+    return unsub
+  }, [temCreds])
 
-  const [lancamentos, setLocal] = useState(carregarLocal)
-  const [carregando, setCarregando] = useState(false)
-  const [erro, setErro] = useState(null)
-
-  useEffect(() => { setLocal(carregarLocal()) }, [carregarLocal])
+  const lancamentos = useMemo(() => todos.filter(l => _doMes(l, mes, ano)), [todos, mes, ano])
+  const pendentes = 0
 
   const sincronizar = useCallback(async () => {
-    if (!navigator.onLine || !temCreds) return
-    setCarregando(true)
-    setErro(null)
-    try {
-      await reconciliarPessoal({ usuario, nome })
-      await sincronizarPessoalPendentes(usuario)
+    if (!temCreds) return
+    try { setTodos(await buscarPessoal()) } catch { /* offline */ }
+  }, [temCreds])
 
-      const remotos = await buscarPessoal(usuario, mes, ano)
-      const todos = getLancamentosPessoal(usuario)
-      const outrosMeses = todos.filter(l => !_doMes(l, mes, ano))
-      const pendentesMes = todos.filter(l => _doMes(l, mes, ano) && !l.sincronizado)
-      const soPendentes = pendentesMes.filter(p => !remotos.find(r => r.id === p.id))
+  const adicionar = useCallback((l) => {
+    setTodos(prev => [...prev, { ...l, sincronizado: true }])
+    adicionarPessoal(l).catch(() => {})
+  }, [])
 
-      const mesAtualizado = [...remotos, ...soPendentes]
-      setLancamentosPessoal(usuario, [...outrosMeses, ...mesAtualizado])
-      setLocal(mesAtualizado)
-    } catch (err) {
-      setErro(err.message)
-    } finally {
-      setCarregando(false)
-    }
-  }, [usuario, nome, mes, ano, temCreds])
+  const atualizar = useCallback((id, dados) => {
+    setTodos(prev => prev.map(l => l.id === id ? { ...l, ...dados } : l))
+    atualizarPessoal(id, dados).catch(() => {})
+  }, [])
 
-  useEffect(() => { sincronizar() }, [sincronizar])
+  const remover = useCallback((id) => {
+    setTodos(prev => prev.filter(l => l.id !== id))
+    removerPessoal(id).catch(() => {})
+  }, [])
 
-  function adicionarLocal(lancamento) {
-    const todos = getLancamentosPessoal(usuario)
-    setLancamentosPessoal(usuario, [...todos, lancamento])
-    setLocal(prev => [...prev, lancamento])
+  return {
+    lancamentos, todos, carregando, erro, pendentes, temCreds, sincronizar,
+    adicionar, atualizar, remover,
+    adicionarLocal: adicionar, atualizarLocal: atualizar, removerLocal: remover,
   }
-
-  function atualizarLocal(id, dados) {
-    const todos = getLancamentosPessoal(usuario).map(l => l.id === id ? { ...l, ...dados } : l)
-    setLancamentosPessoal(usuario, todos)
-    setLocal(prev => prev.map(l => l.id === id ? { ...l, ...dados } : l))
-  }
-
-  function removerLocal(id) {
-    setLancamentosPessoal(usuario, getLancamentosPessoal(usuario).filter(l => l.id !== id))
-    setLocal(prev => prev.filter(l => l.id !== id))
-  }
-
-  const pendentes = lancamentos.filter(l => !l.sincronizado).length
-
-  return { lancamentos, carregando, erro, pendentes, temCreds, sincronizar, adicionarLocal, atualizarLocal, removerLocal }
 }
 
 export default usePessoal

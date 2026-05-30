@@ -1,13 +1,13 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
-import { temAlgumPin } from './services/storage'
+import { estaLogado } from './services/storage'
 import useSync from './hooks/useSync'
-import PinPage from './pages/Pin/PinPage'
+import LoginPage from './pages/Login/LoginPage'
 import Layout from './components/layout/Layout'
 import HomePage from './pages/Home/HomePage'
 import NovoLancamentoPage from './pages/NovoLancamento/NovoLancamentoPage'
 import HistoricoPage from './pages/Historico/HistoricoPage'
-import PessoalPage from './pages/Pessoal/PessoalPage'
+import CarteiraPage from './pages/Carteira/CarteiraPage'
 import ConfiguracoesPage from './pages/Configuracoes/ConfiguracoesPage'
 
 // Lazy load do Dashboard para isolar o chunk do Recharts
@@ -20,9 +20,7 @@ const Carregando = (
 )
 
 function RotaProtegida() {
-  const pinExiste = temAlgumPin()
-  const sessionAtiva = sessionStorage.getItem('fc_session') === 'true'
-  if (!pinExiste || !sessionAtiva) return <Navigate to="/pin" replace />
+  if (!estaLogado()) return <Navigate to="/login" replace />
   return <Outlet />
 }
 
@@ -32,13 +30,13 @@ function App() {
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
       <Routes>
-        <Route path="/pin" element={<PinPage />} />
+        <Route path="/login" element={<LoginPage />} />
         <Route element={<RotaProtegida />}>
           <Route element={<Layout />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/novo" element={<NovoLancamentoPage />} />
             <Route path="/historico" element={<HistoricoPage />} />
-            <Route path="/pessoal" element={<PessoalPage />} />
+            <Route path="/carteira" element={<CarteiraPage />} />
             <Route path="/dashboard" element={
               <Suspense fallback={Carregando}>
                 <DashboardPage />

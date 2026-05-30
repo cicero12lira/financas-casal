@@ -1,0 +1,56 @@
+# FinançasCasal — stack de produção isolada (não toca nos containers JRA/gestao).
+# Sobe: Postgres dedicado + backend FastAPI (interno) + frontend nginx (publica APP_PORT).
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  financas_postgres:
+    image: postgres:16-alpine
+    container_name: financas_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - financas_pgdata:/var/lib/postgresql/data
+    networks:
+      - financas_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  financas_backend:
+    build: ./backend
+    container_name: financas_backend
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    depends_on:
+      financas_postgres:
+        condition: service_healthy
+    networks:
+      - financas_net
+    # Sem ports: acesso só via rede interna (o frontend faz o proxy de /api)
+
+  financas_frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: financas_frontend
+    restart: unless-stopped
+    depends_on:
+      - financas_backend
+    ports:
+      - "${APP_PORT:-8090}:80"
+    networks:
+      - financas_net
+
+volumes:
+  financas_pgdata:
+
+networks:
+  financas_net:
+    driver: bridge

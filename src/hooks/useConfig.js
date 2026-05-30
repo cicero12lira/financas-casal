@@ -1,29 +1,30 @@
 import { useState, useEffect } from 'react'
-import { getConfig, setConfig as saveConfig } from '../services/storage'
-import { buscarConfig, salvarConfig } from '../services/sheets'
+import { estaLogado, getConfig, setConfig as saveConfig } from '../services/storage'
+import { assinarConfig, salvarConfig } from '../services/dados'
 
+// Config do casal. Cacheada no localStorage (exibição offline) e sincronizada
+// com o backend por polling.
 function useConfig() {
   const [config, setLocal] = useState(() => getConfig())
   const [carregando, setCarregando] = useState(false)
 
   useEffect(() => {
-    if (!navigator.onLine) return
+    if (!estaLogado()) return
     setCarregando(true)
-    buscarConfig()
-      .then(remote => {
-        const merged = { ...getConfig(), ...remote }
-        saveConfig(merged)
-        setLocal(merged)
-      })
-      .catch(() => {})
-      .finally(() => setCarregando(false))
+    const unsub = assinarConfig(remote => {
+      const merged = { ...getConfig(), ...remote }
+      saveConfig(merged)
+      setLocal(merged)
+      setCarregando(false)
+    })
+    return unsub
   }, [])
 
   async function atualizar(novos) {
-    const updated = { ...config, ...novos }
+    const updated = { ...getConfig(), ...novos }
     saveConfig(updated)
     setLocal(updated)
-    if (navigator.onLine) {
+    if (estaLogado()) {
       await salvarConfig(novos).catch(() => {})
     }
   }

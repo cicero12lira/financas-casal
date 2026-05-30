@@ -20,3 +20,4 @@ mystical-button-*.json
 .env
 .env.*
 !.env.example
+!.env.prod.example

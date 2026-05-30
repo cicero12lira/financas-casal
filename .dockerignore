@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+backend
+*.md
+.env
+.env.prod
+.env.local
+.github
+scripts/teste-*.mjs
