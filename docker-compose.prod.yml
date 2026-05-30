@@ -1,7 +1,11 @@
 # FinançasCasal — stack de produção isolada (não toca nos containers JRA/gestao).
 # Sobe: Postgres dedicado + backend FastAPI (interno) + frontend nginx (publica APP_PORT).
 #
-#   docker compose -f docker-compose.prod.yml up -d --build
+# IMPORTANTE: passe --env-file .env.prod para que ${DB_USER}, ${DB_PASSWORD},
+# ${DB_NAME} e ${APP_PORT} sejam substituídos (o compose só lê ".env" por padrão,
+# não ".env.prod"). Sem isso o Postgres sobe sem senha e fica unhealthy.
+#
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 
 services:
   financas_postgres:

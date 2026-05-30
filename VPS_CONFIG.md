@@ -173,7 +173,7 @@ USUARIO_B_EMAIL/SENHA/NOME=...
 ```bash
 cd ~/financas
 git pull
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
 docker exec financas_backend python scripts/seed.py     # cria/atualiza os 2 usuários (idempotente)
 ```
 

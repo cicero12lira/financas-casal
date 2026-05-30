@@ -172,7 +172,7 @@ cd backend && pip install -r requirements.txt && uvicorn main:app --reload --por
 Resumo (passo a passo completo em `VPS_CONFIG.md`):
 1. `git pull` em `~/financas` na VPS.
 2. `cp .env.prod.example .env.prod` e preencher (senha do DB, `SECRET_KEY`, e-mails/senhas do casal).
-3. `docker compose -f docker-compose.prod.yml up -d --build`.
+3. `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build` (o `--env-file` é necessário para interpolar `${DB_*}`/`${APP_PORT}`).
 4. `docker exec financas_backend python scripts/seed.py` (cria os 2 usuários).
 5. Adicionar o bloco de `nginx-gestao-snippet.md` ao `gestao_nginx` (com backup + `nginx -t`).
 6. Acessar `https://financas-casal.pipeauto.com.br`.
