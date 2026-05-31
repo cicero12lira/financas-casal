@@ -38,7 +38,7 @@ function DashboardPage() {
   const lancamentos = combinarLancamentos(casal.lancamentos, pessoal.lancamentos, escopo)
   // Para pizza/tabela/maior gasto: cartão conta quando pago (Orçado×Realizado consistente).
   const despesas = lancamentos.filter(l =>
-    ehDespesa(l.tipo) && l.efetivada !== false && !(l.tipo === 'cartao' && l.pago !== true)
+    ehDespesa(l.tipo) && l.efetivada !== false && !(l.tipo === 'cartao' && l.pago === false)
   )
   const totalDespesas = despesas.reduce((s, l) => s + l.valor, 0)
   const orcamento = orcamentoDoEscopo(config, escopo, getUsuario())
@@ -85,11 +85,13 @@ function DashboardPage() {
     return result
   }, [mes, ano, escopo, casal.todos, pessoal.todos])
 
-  // Previsão: lançamentos futuros (efetivada=false) agrupados por mês (próximos 6).
+  // Previsão: lançamentos agendados (efetivada=false) + despesas de cartão não pagas.
+  // Mostra os próximos 6 meses. Não usa somentePagosCartao — queremos ver o que vai sair.
   const previsao = useMemo(() => {
+    const _filtro = l => l.efetivada === false || (l.tipo === 'cartao' && l.pago === false)
     const todosFuturos = combinarLancamentos(
-      (casal.todos || []).filter(l => l.efetivada === false),
-      (pessoal.todos || []).filter(l => l.efetivada === false),
+      (casal.todos || []).filter(_filtro),
+      (pessoal.todos || []).filter(_filtro),
       escopo,
     )
     const result = []

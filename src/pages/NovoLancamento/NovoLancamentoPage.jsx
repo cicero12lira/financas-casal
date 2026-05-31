@@ -432,23 +432,13 @@ function NovoLancamentoPage() {
           </Section>
         )}
 
-        {/* Categoria — lista para melhor espaçamento */}
+        {/* Categoria — colapsável, toque para expandir */}
         {usaCategoria && (
           <Section titulo="Categoria">
-            <div className="space-y-1.5">
-              {categorias.map(cat => (
-                <button key={cat.id} onClick={() => setCategoria(cat.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border text-sm transition-colors ${
-                    categoria === cat.id
-                      ? 'bg-accent-primary/20 border-accent-primary text-accent-primary'
-                      : 'bg-bg-card border-border text-text-secondary'
-                  }`}>
-                  <span className="text-xl w-7 text-center flex-shrink-0">{cat.icon}</span>
-                  <span className="flex-1 text-left">{cat.label}</span>
-                  {categoria === cat.id && <span className="text-accent-primary">✓</span>}
-                </button>
-              ))}
-            </div>
+            <CategoriaPicker
+              categorias={categorias}
+              valor={categoria}
+              onChange={setCategoria} />
           </Section>
         )}
 
@@ -587,6 +577,57 @@ function NovoLancamentoPage() {
       </div>
 
       {toast && <Toast mensagem={toast.mensagem} tipo={toast.tipo} onClose={() => setToast(null)} />}
+    </div>
+  )
+}
+
+// Seletor de categoria colapsável — toca o botão para expandir/recolher a lista.
+function CategoriaPicker({ categorias, valor, onChange }) {
+  const [aberto, setAberto] = useState(false)
+  const selecionada = categorias.find(c => c.id === valor)
+
+  function escolher(id) {
+    onChange(id)
+    setAberto(false)
+  }
+
+  return (
+    <div>
+      {/* Botão colapsado — igual ao visual do <select> */}
+      <button type="button" onClick={() => setAberto(v => !v)}
+        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-sm transition-colors ${
+          aberto ? 'border-accent-primary' : 'border-border'
+        } bg-bg-card text-text-primary`}>
+        {selecionada ? (
+          <>
+            <span className="text-xl w-7 text-center flex-shrink-0">{selecionada.icon}</span>
+            <span className="flex-1 text-left">{selecionada.label}</span>
+          </>
+        ) : (
+          <span className="flex-1 text-left text-text-secondary">Selecione a categoria</span>
+        )}
+        <span className={`text-text-secondary transition-transform ${aberto ? 'rotate-180' : ''}`}>▾</span>
+      </button>
+
+      {/* Lista expandida */}
+      {aberto && (
+        <div className="mt-1 border border-border rounded-xl overflow-hidden bg-bg-card">
+          {categorias.map((cat, i) => (
+            <button key={cat.id} type="button" onClick={() => escolher(cat.id)}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-sm transition-colors ${
+                i < categorias.length - 1 ? 'border-b border-border' : ''
+              } ${
+                valor === cat.id
+                  ? 'bg-accent-primary/15 text-accent-primary'
+                  : 'text-text-primary active:bg-border'
+              }`}>
+              <span className="text-xl w-7 text-center flex-shrink-0">{cat.icon}</span>
+              <span className="flex-1 text-left">{cat.label}</span>
+              {valor === cat.id && <span className="text-accent-primary text-xs">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

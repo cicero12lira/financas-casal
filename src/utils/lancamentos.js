@@ -23,12 +23,18 @@ function somaReceitas(lista, { soEfetivadas = true } = {}) {
 // somentePagosCartao: despesas de cartão (tipo='cartao') só contam quando pago===true.
 //   Use true em Saldo do mês, Orçado×Realizado, Últimos 6 meses.
 //   Use false na previsão futura (onde queremos ver o que ainda vai sair).
+// soEfetivadas: ignora agendados pendentes (efetivada=false).
+// somentePagosCartao: cartão só conta quando pago!==false — exclui faturas ainda abertas.
+//   Usar true em Saldo do mês, Orçado×Realizado, Últimos 6 meses.
+//   Usar false na previsão futura.
+// Nota: usa `pago === false` (não `!== true`) para compat com dados antigos
+// onde o campo `pago` pode ser undefined — esses são tratados como pagos.
 function somaDespesas(lista, { soEfetivadas = true, somentePagosCartao = false } = {}) {
   return lista
     .filter(l => {
       if (!ehDespesa(l.tipo)) return false
       if (soEfetivadas && !_efetivada(l)) return false
-      if (somentePagosCartao && l.tipo === 'cartao' && l.pago !== true) return false
+      if (somentePagosCartao && l.tipo === 'cartao' && l.pago === false) return false
       return true
     })
     .reduce((s, l) => s + l.valor, 0)
