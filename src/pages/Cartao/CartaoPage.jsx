@@ -3,7 +3,7 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import useCartoes from '../../hooks/useCartoes'
+import useTodosCartoes from '../../hooks/useTodosCartoes'
 import useLancamentos from '../../hooks/useLancamentos'
 import usePessoal from '../../hooks/usePessoal'
 import useCategorias from '../../hooks/useCategorias'
@@ -14,24 +14,23 @@ import { iconeCategoria } from '../../constants/categories'
 
 function CartaoPage() {
   const { id } = useParams()
-  const [searchParams] = useSearchParams()
-  const escopo = searchParams.get('escopo') === 'casal' ? 'casal' : 'pessoal'
   const navigate = useNavigate()
   const [toast, setToast] = useState(null)
 
-  const { cartoes } = useCartoes(escopo)
+  const { cartoes } = useTodosCartoes()
   const now = new Date()
   const casalLanc = useLancamentos(now.getMonth() + 1, now.getFullYear())
   const pessoalLanc = usePessoal(now.getMonth() + 1, now.getFullYear())
-  const hook = escopo === 'pessoal' ? pessoalLanc : casalLanc
   const { categorias } = useCategorias()
 
   const cartao = cartoes.find(c => c.id === id)
-  const lancCartao = (hook.todos || []).filter(l => l.tipo === 'cartao' && l.cartao_id === id)
-  const uso = cartao ? usoCartao(cartao, hook.todos || []) : { usado: 0, limite: 0, disponivel: 0 }
-  const faturas = cartao ? faturasCartao(cartao, hook.todos || []) : []
 
-  // Gasto por competência (últimas faturas, ordem cronológica para o gráfico).
+  // Combina casal + pessoal para mostrar TODOS os lançamentos deste cartão,
+  // independente de qual escopo o usuário abriu.
+  const todosLanc = [...(casalLanc.todos || []), ...(pessoalLanc.todos || [])]
+  const uso = cartao ? usoCartao(cartao, todosLanc) : { usado: 0, limite: 0, disponivel: 0 }
+  const faturas = cartao ? faturasCartao(cartao, todosLanc) : []
+
   const porMes = [...faturas].reverse().slice(-6).map(f => ({
     mes: formatarCompetencia(f.competencia).split(' ')[0].slice(0, 3),
     total: f.total,
@@ -46,7 +45,11 @@ function CartaoPage() {
       setToast({ mensagem: 'Defina a conta de pagamento do cartão (na Carteira).', tipo: 'erro' })
       return
     }
-    fatura.itens.forEach(l => hook.atualizar(l.id, { pago: true, conta_id: cartao.conta_pagamento_id }))
+    const casalIds = new Set((casalLanc.todos || []).map(l => l.id))
+    fatura.itens.forEach(l => {
+      const hook = casalIds.has(l.id) ? casalLanc : pessoalLanc
+      hook.atualizar(l.id, { pago: true, conta_id: cartao.conta_pagamento_id })
+    })
     setToast({ mensagem: `Fatura de ${formatarCompetencia(fatura.competencia)} paga!`, tipo: 'sucesso' })
   }
 

@@ -32,7 +32,8 @@ function HomePage() {
   // Para saldos e cartões usamos todos os lançamentos (de todos os meses) das duas esferas.
   const todosLanc = [...(casal.todos || []), ...(pessoal.todos || [])]
 
-  const totalDespesas = somaDespesas(lancamentos)
+  // Saldo do mês: cartão só conta quando fatura paga (somentePagosCartao).
+  const totalDespesas = somaDespesas(lancamentos, { somentePagosCartao: true })
   const totalReceitas = somaReceitas(lancamentos)
   const saldo = totalReceitas - totalDespesas
   const orcamento = orcamentoDoEscopo(config, escopo, getUsuario())
@@ -208,6 +209,8 @@ function HomePage() {
 
 function ItemLancamento({ lancamento, categorias, onClick }) {
   const { descricao, categoria, valor, tipo, quem_pagou, data, sincronizado, efetivada, _escopo } = lancamento
+  const hoje = new Date().toISOString().split('T')[0]
+  const vencido = efetivada === false && data <= hoje
   const ehReceita = tipo === 'receita'
   const ehTransf = tipo === 'transferencia'
   const icone = tipo === 'receita' || ehTransf || tipo === 'cartao'
@@ -218,18 +221,22 @@ function ItemLancamento({ lancamento, categorias, onClick }) {
 
   return (
     <button onClick={onClick}
-      className="w-full flex items-center gap-3 bg-bg-card rounded-xl border border-border px-4 py-3 animate-fade-in text-left active:opacity-70">
+      className={`w-full flex items-center gap-3 rounded-xl border px-4 py-3 animate-fade-in text-left active:opacity-70 ${
+        vencido ? 'bg-danger/10 border-danger/40' : 'bg-bg-card border-border'
+      }`}>
       <span className="text-xl w-8 text-center">{icone}</span>
       <div className="flex-1 min-w-0">
-        <p className="text-text-primary text-sm font-medium truncate">{descricao || categoria || 'Transferência'}</p>
+        <p className={`text-sm font-medium truncate ${vencido ? 'text-danger' : 'text-text-primary'}`}>
+          {descricao || categoria || 'Transferência'}
+        </p>
         <p className="text-text-secondary text-xs">{legenda}</p>
       </div>
       <div className="text-right flex-shrink-0">
-        <p className={`text-sm font-semibold ${ehReceita ? 'text-accent-secondary' : ehTransf ? 'text-text-secondary' : 'text-text-primary'}`}>
+        <p className={`text-sm font-semibold ${ehReceita ? 'text-accent-secondary' : ehTransf ? 'text-text-secondary' : vencido ? 'text-danger' : 'text-text-primary'}`}>
           {ehTransf ? '' : ehReceita ? '+' : '−'}{formatarMoeda(valor)}
         </p>
         <p className="text-xs text-text-secondary">
-          {efetivada === false ? '📅' : ''}{!sincronizado ? '⏳' : ''}
+          {vencido ? '⚠️' : efetivada === false ? '📅' : ''}{!sincronizado ? '⏳' : ''}
         </p>
       </div>
     </button>

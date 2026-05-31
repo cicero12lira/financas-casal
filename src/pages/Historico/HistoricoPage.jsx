@@ -182,22 +182,24 @@ function HistoricoPage() {
 
 function ItemAgendado({ lancamento, categorias, onConfirmar, onExcluir, onEditar }) {
   const { descricao, categoria, valor, tipo, data, parcela_num, parcela_total } = lancamento
+  const hoje = new Date().toISOString().split('T')[0]
+  const vencido = data <= hoje
   const ehReceita = tipo === 'receita'
   const icone = ehReceita || tipo === 'transferencia' || tipo === 'cartao'
     ? iconeTipoLancamento(tipo)
     : iconeCategoria(categoria, categorias)
   return (
-    <div className="bg-bg-card border border-border rounded-xl px-4 py-3">
+    <div className={`rounded-xl border px-4 py-3 ${vencido ? 'bg-danger/10 border-danger/40' : 'bg-bg-card border-border'}`}>
       <div className="flex items-center gap-3" onClick={onEditar}>
         <span className="text-xl w-8 text-center">{icone}</span>
         <div className="flex-1 min-w-0">
-          <p className="text-text-primary text-sm font-medium truncate">
-            {descricao || categoria || 'Lançamento'}
+          <p className={`text-sm font-medium truncate ${vencido ? 'text-danger' : 'text-text-primary'}`}>
+            {vencido ? '⚠️ ' : ''}{descricao || categoria || 'Lançamento'}
             {parcela_total > 1 ? ` (${parcela_num}/${parcela_total})` : ''}
           </p>
           <p className="text-text-secondary text-xs">{formatarData(data + 'T00:00:00')}</p>
         </div>
-        <p className={`text-sm font-semibold ${ehReceita ? 'text-accent-secondary' : 'text-text-primary'}`}>
+        <p className={`text-sm font-semibold ${ehReceita ? 'text-accent-secondary' : vencido ? 'text-danger' : 'text-text-primary'}`}>
           {ehReceita ? '+' : '−'}{formatarMoeda(valor)}
         </p>
       </div>
@@ -233,6 +235,8 @@ function ItemSwipavel({ lancamento, categorias, podeExcluir, onExcluir, onEditar
   function fechar() { setOffsetX(0); setMostrarAcoes(false) }
 
   const { descricao, categoria, valor, tipo, quem_pagou, data, sincronizado, efetivada, _escopo } = lancamento
+  const hoje = new Date().toISOString().split('T')[0]
+  const vencido = efetivada === false && data <= hoje
   const ehReceita = tipo === 'receita'
   const ehTransf = tipo === 'transferencia'
   const icone = ehReceita || ehTransf || tipo === 'cartao'
@@ -250,7 +254,9 @@ function ItemSwipavel({ lancamento, categorias, podeExcluir, onExcluir, onEditar
         </button>
       </div>
 
-      <div className="flex items-center gap-3 bg-bg-card border border-border px-4 py-3 relative z-10 transition-transform"
+      <div className={`flex items-center gap-3 px-4 py-3 relative z-10 transition-transform ${
+        vencido ? 'bg-danger/10 border border-danger/40' : 'bg-bg-card border border-border'
+      }`}
         style={{ transform: `translateX(${offsetX}px)` }}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
         onClick={mostrarAcoes ? fechar : onEditar}>
@@ -260,11 +266,11 @@ function ItemSwipavel({ lancamento, categorias, podeExcluir, onExcluir, onEditar
           <p className="text-text-secondary text-xs">{legenda}</p>
         </div>
         <div className="text-right flex-shrink-0">
-          <p className={`text-sm font-semibold ${ehReceita ? 'text-accent-secondary' : ehTransf ? 'text-text-secondary' : 'text-text-primary'}`}>
+          <p className={`text-sm font-semibold ${ehReceita ? 'text-accent-secondary' : ehTransf ? 'text-text-secondary' : vencido ? 'text-danger' : 'text-text-primary'}`}>
             {ehTransf ? '' : ehReceita ? '+' : '−'}{formatarMoeda(valor)}
           </p>
           <p className="text-xs text-text-secondary">
-            {efetivada === false ? '📅' : ''}{!sincronizado ? '⏳' : ''}
+            {vencido ? '⚠️' : efetivada === false ? '📅' : ''}{!sincronizado ? '⏳' : ''}
           </p>
         </div>
       </div>

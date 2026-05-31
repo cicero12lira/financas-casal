@@ -9,8 +9,8 @@ import useTodosCartoes from '../../hooks/useTodosCartoes'
 import Toast from '../../components/ui/Toast'
 import { gerarUUID } from '../../utils/uuid'
 import { TIPOS_LANCAMENTO, ESCOPOS, FREQUENCIAS } from '../../constants/financas'
-import { competenciaCartao, faturasCartao } from '../../utils/lancamentos'
-import { formatarCompetencia } from '../../utils/formatters'
+import { competenciaCartao, faturasCartao, saldoConta } from '../../utils/lancamentos'
+import { formatarCompetencia, formatarMoeda } from '../../utils/formatters'
 import { getUsuario } from '../../services/storage'
 
 // --- Helpers de data ----------------------------------------------------------
@@ -117,6 +117,19 @@ function NovoLancamentoPage() {
 
   const faturaJaPaga = !editando && !!faturaInfo?.paga
 
+  // --- Verificação de saldo insuficiente (apenas gasto/transferência) ----------
+  const todosLancSaldo = [...(lancCasal.todos || []), ...(lancPessoal.todos || [])]
+  const contaSelecionada = contas.find(c => c.id === contaId)
+  const saldoContaAtual = contaSelecionada
+    ? saldoConta(contaSelecionada, todosLancSaldo)
+    : null
+  const saldoInsuficiente = !editando &&
+    (tipo === 'gasto' || tipo === 'transferencia') &&
+    !!contaId &&
+    saldoContaAtual !== null &&
+    valorNum > 0 &&
+    saldoContaAtual < valorNum
+
   // --- Efeitos ----------------------------------------------------------------
   useEffect(() => { if (!editando) inputRef.current?.focus() }, [editando])
 
@@ -165,6 +178,7 @@ function NovoLancamentoPage() {
     escopo !== null &&
     valorNum > 0 &&
     (!usaCategoria || categoria) &&
+    !saldoInsuficiente &&
     (ehCartao
       ? !!cartaoId && !faturaJaPaga
       : ehTransferencia
@@ -306,27 +320,6 @@ function NovoLancamentoPage() {
 
       <div className="px-4 pb-8 space-y-6">
 
-        {/* Escopo — sem pré-seleção em novos lançamentos */}
-        <Section titulo="Escopo">
-          <div className="flex gap-2">
-            {ESCOPOS.map(e => (
-              <button key={e.id}
-                onClick={() => !editando && handleEscopoChange(e.id)}
-                disabled={editando}
-                className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
-                  escopo === e.id
-                    ? 'bg-accent-primary/20 border-accent-primary text-accent-primary'
-                    : 'bg-bg-card border-border text-text-secondary'
-                } ${editando ? 'opacity-60' : ''}`}>
-                {e.label}
-              </button>
-            ))}
-          </div>
-          {!escopo && !editando && (
-            <p className="text-xs text-text-secondary mt-1">Selecione o escopo para continuar.</p>
-          )}
-        </Section>
-
         {/* Valor */}
         <div className="text-center pt-1">
           <p className="text-text-secondary text-xs mb-2">Valor</p>
@@ -423,27 +416,36 @@ function NovoLancamentoPage() {
             {contas.length === 0 ? (
               <AvisoVazio texto="Cadastre uma conta na Carteira para lançar." />
             ) : (
-              <select value={contaId} onChange={e => setContaId(e.target.value)} className={selectCls}>
-                <option value="">Selecione a conta</option>
-                {contas.map(c => <option key={c.id} value={c.id}>{c.nome} · {c._escopo}</option>)}
-              </select>
+              <div className="space-y-2">
+                <select value={contaId} onChange={e => setContaId(e.target.value)} className={selectCls}>
+                  <option value="">Selecione a conta</option>
+                  {contas.map(c => <option key={c.id} value={c.id}>{c.nome} · {c._escopo}</option>)}
+                </select>
+                {/* Aviso de saldo insuficiente */}
+                {saldoInsuficiente && (
+                  <div className="rounded-xl px-4 py-3 text-xs bg-danger/15 border border-danger/40 text-danger">
+                    Saldo insuficiente — disponível {formatarMoeda(saldoContaAtual ?? 0)}, necessário {formatarMoeda(valorNum)}.
+                  </div>
+                )}
+              </div>
             )}
           </Section>
         )}
 
-        {/* Categoria */}
+        {/* Categoria — lista para melhor espaçamento */}
         {usaCategoria && (
           <Section titulo="Categoria">
-            <div className="grid grid-cols-4 gap-2">
+            <div className="space-y-1.5">
               {categorias.map(cat => (
                 <button key={cat.id} onClick={() => setCategoria(cat.id)}
-                  className={`flex flex-col items-center gap-1 py-3 rounded-xl border text-xs transition-colors ${
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border text-sm transition-colors ${
                     categoria === cat.id
                       ? 'bg-accent-primary/20 border-accent-primary text-accent-primary'
                       : 'bg-bg-card border-border text-text-secondary'
                   }`}>
-                  <span className="text-2xl">{cat.icon}</span>
-                  <span className="leading-tight text-center">{cat.label}</span>
+                  <span className="text-xl w-7 text-center flex-shrink-0">{cat.icon}</span>
+                  <span className="flex-1 text-left">{cat.label}</span>
+                  {categoria === cat.id && <span className="text-accent-primary">✓</span>}
                 </button>
               ))}
             </div>
@@ -523,6 +525,27 @@ function NovoLancamentoPage() {
                 className="flex-1 bg-transparent text-sm text-text-primary outline-none text-right" />
             </div>
           </div>
+        </Section>
+
+        {/* Escopo — antes do salvar, sem pré-seleção em novos lançamentos */}
+        <Section titulo="Escopo">
+          <div className="flex gap-2">
+            {ESCOPOS.map(e => (
+              <button key={e.id}
+                onClick={() => !editando && handleEscopoChange(e.id)}
+                disabled={editando}
+                className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
+                  escopo === e.id
+                    ? 'bg-accent-primary/20 border-accent-primary text-accent-primary'
+                    : 'bg-bg-card border-border text-text-secondary'
+                } ${editando ? 'opacity-60' : ''}`}>
+                {e.label}
+              </button>
+            ))}
+          </div>
+          {!escopo && !editando && (
+            <p className="text-xs text-text-secondary mt-1">Selecione o escopo para continuar.</p>
+          )}
         </Section>
 
         {bloqueadoEdicao && (

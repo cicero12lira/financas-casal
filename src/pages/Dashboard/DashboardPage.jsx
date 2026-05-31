@@ -36,7 +36,10 @@ function DashboardPage() {
   const { config } = useConfig()
 
   const lancamentos = combinarLancamentos(casal.lancamentos, pessoal.lancamentos, escopo)
-  const despesas = lancamentos.filter(l => ehDespesa(l.tipo) && l.efetivada !== false)
+  // Para pizza/tabela/maior gasto: cartão conta quando pago (Orçado×Realizado consistente).
+  const despesas = lancamentos.filter(l =>
+    ehDespesa(l.tipo) && l.efetivada !== false && !(l.tipo === 'cartao' && l.pago !== true)
+  )
   const totalDespesas = despesas.reduce((s, l) => s + l.valor, 0)
   const orcamento = orcamentoDoEscopo(config, escopo, getUsuario())
 
@@ -74,7 +77,8 @@ function DashboardPage() {
       )
       result.push({
         label: formatarMesAno(m, a).slice(0, 3),
-        Despesas: somaDespesas(lista),
+        // Últimos 6 meses: cartão só conta quando fatura paga.
+        Despesas: somaDespesas(lista, { somentePagosCartao: true }),
         Receitas: somaReceitas(lista),
       })
     }
