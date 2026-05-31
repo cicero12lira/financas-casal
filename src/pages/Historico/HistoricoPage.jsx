@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import useLancamentos from '../../hooks/useLancamentos'
 import usePessoal from '../../hooks/usePessoal'
 import useCategorias from '../../hooks/useCategorias'
@@ -12,17 +12,29 @@ const FILTROS_TIPO = ['todos', ...TIPOS_LANCAMENTO.map(t => t.id)]
 
 function HistoricoPage() {
   const now = new Date()
+  const [searchParams] = useSearchParams()
   const [mes, setMes] = useState(now.getMonth() + 1)
   const [ano, setAno] = useState(now.getFullYear())
-  const [escopo, setEscopo] = useState('tudo')
+  const [escopo, setEscopo] = useState('pessoal')
   const [filtroTipo, setFiltroTipo] = useState('todos')
   const [filtroCategoria, setFiltroCategoria] = useState('todas')
   const [filtroPessoa, setFiltroPessoa] = useState('todas')
+  const [verAgendados, setVerAgendados] = useState(searchParams.get('agendados') === '1')
 
   const casal = useLancamentos(mes, ano)
   const pessoal = usePessoal(mes, ano)
   const { categorias } = useCategorias()
   const navigate = useNavigate()
+
+  // Agendados/pendentes (efetivada=false) de qualquer mês, conforme o escopo.
+  const pendentes = combinarLancamentos(casal.todos || [], pessoal.todos || [], escopo)
+    .filter(l => l.efetivada === false)
+    .sort((a, b) => (a.data ?? '').localeCompare(b.data ?? ''))
+
+  function confirmar(l) {
+    const hook = l._escopo === 'pessoal' ? pessoal : casal
+    hook.atualizar(l.id, { efetivada: true })
+  }
 
   function navMes(delta) {
     let novoMes = mes + delta
@@ -81,6 +93,34 @@ function HistoricoPage() {
         ))}
       </div>
 
+      {/* Alternar Agendados */}
+      <button onClick={() => setVerAgendados(v => !v)}
+        className={`w-full mb-4 py-2 rounded-xl text-xs font-medium border transition-colors ${
+          verAgendados
+            ? 'bg-accent-primary/20 border-accent-primary text-accent-primary'
+            : 'bg-bg-card border-border text-text-secondary'
+        }`}>
+        📅 Agendados{pendentes.length > 0 ? ` (${pendentes.length})` : ''}
+      </button>
+
+      {verAgendados ? (
+        pendentes.length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-4xl mb-3">📅</p>
+            <p className="text-text-secondary text-sm">Nenhum lançamento agendado.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {pendentes.map(l => (
+              <ItemAgendado key={l.id} lancamento={l} categorias={categorias}
+                onConfirmar={() => confirmar(l)}
+                onExcluir={() => excluir(l)}
+                onEditar={() => navigate(`/novo?id=${l.id}&escopo=${l._escopo}`)} />
+            ))}
+          </div>
+        )
+      ) : (
+      <>
       {/* Total do período */}
       <div className="bg-bg-card rounded-2xl border border-border px-4 py-3 mb-4 flex justify-between items-center">
         <span className="text-text-secondary text-sm">Total filtrado</span>
@@ -129,15 +169,53 @@ function HistoricoPage() {
           {filtrados.map(l => (
             <ItemSwipavel key={l.id} lancamento={l} categorias={categorias}
               podeExcluir={!(l._escopo === 'pessoal' && l.origem === 'casal')}
-              onExcluir={() => excluir(l)} />
+              onExcluir={() => excluir(l)}
+              onEditar={() => navigate(`/novo?id=${l.id}&escopo=${l._escopo}`)} />
           ))}
         </div>
+      )}
+      </>
       )}
     </div>
   )
 }
 
-function ItemSwipavel({ lancamento, categorias, podeExcluir, onExcluir }) {
+function ItemAgendado({ lancamento, categorias, onConfirmar, onExcluir, onEditar }) {
+  const { descricao, categoria, valor, tipo, data, parcela_num, parcela_total } = lancamento
+  const ehReceita = tipo === 'receita'
+  const icone = ehReceita || tipo === 'transferencia' || tipo === 'cartao'
+    ? iconeTipoLancamento(tipo)
+    : iconeCategoria(categoria, categorias)
+  return (
+    <div className="bg-bg-card border border-border rounded-xl px-4 py-3">
+      <div className="flex items-center gap-3" onClick={onEditar}>
+        <span className="text-xl w-8 text-center">{icone}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-text-primary text-sm font-medium truncate">
+            {descricao || categoria || 'Lançamento'}
+            {parcela_total > 1 ? ` (${parcela_num}/${parcela_total})` : ''}
+          </p>
+          <p className="text-text-secondary text-xs">{formatarData(data + 'T00:00:00')}</p>
+        </div>
+        <p className={`text-sm font-semibold ${ehReceita ? 'text-accent-secondary' : 'text-text-primary'}`}>
+          {ehReceita ? '+' : '−'}{formatarMoeda(valor)}
+        </p>
+      </div>
+      <div className="flex gap-2 mt-2">
+        <button onClick={onConfirmar}
+          className="flex-1 py-1.5 rounded-lg bg-accent-secondary/15 text-accent-secondary text-xs font-medium active:scale-95 transition-all">
+          Confirmar
+        </button>
+        <button onClick={onExcluir}
+          className="flex-1 py-1.5 rounded-lg bg-danger/15 text-danger text-xs font-medium active:scale-95 transition-all">
+          Excluir
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ItemSwipavel({ lancamento, categorias, podeExcluir, onExcluir, onEditar }) {
   const [offsetX, setOffsetX] = useState(0)
   const [mostrarAcoes, setMostrarAcoes] = useState(false)
   const startX = useRef(0)
@@ -175,7 +253,7 @@ function ItemSwipavel({ lancamento, categorias, podeExcluir, onExcluir }) {
       <div className="flex items-center gap-3 bg-bg-card border border-border px-4 py-3 relative z-10 transition-transform"
         style={{ transform: `translateX(${offsetX}px)` }}
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
-        onClick={mostrarAcoes ? fechar : undefined}>
+        onClick={mostrarAcoes ? fechar : onEditar}>
         <span className="text-xl w-8 text-center">{icone}</span>
         <div className="flex-1 min-w-0">
           <p className="text-text-primary text-sm font-medium truncate">{descricao || categoria || 'Transferência'}</p>

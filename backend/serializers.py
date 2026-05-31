@@ -4,7 +4,8 @@ Inclui sincronizado=True (o que vem do servidor já está confirmado)."""
 _LANC = [
     "id", "data", "valor", "tipo", "categoria", "quem_pagou", "descricao",
     "criado_em", "conta_id", "conta_destino_id", "cartao_id", "recorrente",
-    "frequencia", "vencimento", "efetivada", "origem", "ref_casal_id",
+    "frequencia", "vencimento", "efetivada", "serie_id", "parcela_num",
+    "parcela_total", "pago", "competencia", "origem", "ref_casal_id",
 ]
 _CONTA = ["id", "nome", "tipo", "saldo_inicial", "criado_em"]
 _CARTAO = ["id", "nome", "bandeira", "limite", "dia_fechamento", "dia_vencimento",

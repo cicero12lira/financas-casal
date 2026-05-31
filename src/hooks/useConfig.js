@@ -32,4 +32,20 @@ function useConfig() {
   return { config, carregando, atualizar }
 }
 
+// Orçamento conforme o escopo selecionado.
+//  - 'casal'   → orcamento_casal
+//  - 'pessoal' → orcamento_pessoal_<usuario> (a|b)
+//  - 'tudo'    → casal + meu pessoal
+// Compatível com o campo único antigo `orcamento_mensal` (fallback).
+function orcamentoDoEscopo(config, escopo, usuario) {
+  const legado = Number(config.orcamento_mensal) || 0
+  const chaveMeu = usuario === 'b' ? 'orcamento_pessoal_b' : 'orcamento_pessoal_a'
+  const casal = Number(config.orcamento_casal) || 0
+  const meu = Number(config[chaveMeu]) || 0
+  if (escopo === 'pessoal') return meu || legado
+  if (escopo === 'casal') return casal || legado
+  return (casal + meu) || legado
+}
+
 export default useConfig
+export { orcamentoDoEscopo }

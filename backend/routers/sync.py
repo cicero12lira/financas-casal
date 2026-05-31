@@ -31,7 +31,11 @@ def reconciliar(db: Session = Depends(get_db), usuario: Usuario = Depends(usuari
 
     despesas_casal = (
         db.query(Lancamento)
-        .filter(Lancamento.escopo == "casal", Lancamento.tipo == "gasto", Lancamento.quem_pagou == nome)
+        .filter(
+            Lancamento.escopo == "casal",
+            Lancamento.tipo.in_(["gasto", "cartao"]),
+            Lancamento.quem_pagou == nome,
+        )
         .all()
     )
     ids_casal = {d.id for d in despesas_casal}

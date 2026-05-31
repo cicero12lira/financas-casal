@@ -4,55 +4,121 @@ import useConfig from '../../hooks/useConfig'
 import useLancamentos from '../../hooks/useLancamentos'
 import usePessoal from '../../hooks/usePessoal'
 import useCategorias from '../../hooks/useCategorias'
-import useContas from '../../hooks/useContas'
+import useTodasContas from '../../hooks/useTodasContas'
 import useCartoes from '../../hooks/useCartoes'
 import Toast from '../../components/ui/Toast'
 import { gerarUUID } from '../../utils/uuid'
 import { TIPOS_LANCAMENTO, ESCOPOS, FREQUENCIAS } from '../../constants/financas'
+import { competenciaCartao } from '../../utils/lancamentos'
+import { digitosParaCentavos, formatarValorInput } from '../../utils/formatters'
+import { getUsuario } from '../../services/storage'
+
+// --- Helpers de data (sem depender de fuso) ---------------------------------
+function addMeses(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number)
+  const total = (m - 1) + n
+  const ny = y + Math.floor(total / 12)
+  const nm = ((total % 12) + 12) % 12
+  const ultimoDia = new Date(ny, nm + 1, 0).getDate()
+  const nd = Math.min(d, ultimoDia)
+  return `${ny}-${String(nm + 1).padStart(2, '0')}-${String(nd).padStart(2, '0')}`
+}
+
+function addDias(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d + n))
+  return dt.toISOString().split('T')[0]
+}
+
+function compMaisMeses(comp, n) {
+  const [y, m] = comp.split('-').map(Number)
+  const total = (m - 1) + n
+  const ny = y + Math.floor(total / 12)
+  const nm = ((total % 12) + 12) % 12
+  return `${ny}-${String(nm + 1).padStart(2, '0')}`
+}
 
 function NovoLancamentoPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const editId = searchParams.get('id')
+  const editando = !!editId
 
-  const [escopo, setEscopo] = useState(searchParams.get('escopo') === 'pessoal' ? 'pessoal' : 'casal')
+  const [escopo, setEscopo] = useState(searchParams.get('escopo') === 'casal' ? 'casal' : 'pessoal')
   const ehPessoal = escopo === 'pessoal'
 
   const { config } = useConfig()
   const { categorias } = useCategorias()
-  const { contas } = useContas(escopo)
+  const { contas } = useTodasContas()
   const { cartoes } = useCartoes(escopo)
   const now = new Date()
   const lancCasal = useLancamentos(now.getMonth() + 1, now.getFullYear())
   const lancPessoal = usePessoal(now.getMonth() + 1, now.getFullYear())
 
-  const [rawValor, setRawValor] = useState('')
+  const [valorCentavos, setValorCentavos] = useState(0)
   const [tipo, setTipo] = useState('gasto')
   const [categoria, setCategoria] = useState(null)
   const [quemPagou, setQuemPagou] = useState('')
   const [contaId, setContaId] = useState('')
   const [contaDestinoId, setContaDestinoId] = useState('')
   const [cartaoId, setCartaoId] = useState('')
+  const [parcelas, setParcelas] = useState(1)
   const [recorrente, setRecorrente] = useState(false)
   const [frequencia, setFrequencia] = useState('mensal')
+  const [repeticoes, setRepeticoes] = useState(12)
   const [vencimento, setVencimento] = useState('')
   const [efetivada, setEfetivada] = useState(true)
   const [descricao, setDescricao] = useState('')
   const [data, setData] = useState(now.toISOString().split('T')[0])
   const [toast, setToast] = useState(null)
   const [salvando, setSalvando] = useState(false)
+  const [confirmExcluir, setConfirmExcluir] = useState(false)
   const inputRef = useRef(null)
+  const prefilled = useRef(false)
+  const quemPagouAuto = useRef(false)
 
   const nomeA = config.nome_pessoa_a || 'Pessoa A'
   const nomeB = config.nome_pessoa_b || 'Pessoa B'
 
-  useEffect(() => { inputRef.current?.focus() }, [])
+  // Item em edição (procura em todos os meses do escopo).
+  const itemEdit = editando
+    ? (ehPessoal ? lancPessoal.todos : lancCasal.todos)?.find(l => l.id === editId)
+    : null
+
+  useEffect(() => { if (!editando) inputRef.current?.focus() }, [editando])
+
+  // Pré-preenche o formulário ao editar.
+  useEffect(() => {
+    if (!editando || prefilled.current || !itemEdit) return
+    prefilled.current = true
+    setValorCentavos(Math.round((itemEdit.valor || 0) * 100))
+    setTipo(itemEdit.tipo)
+    setCategoria(itemEdit.categoria || null)
+    setQuemPagou(itemEdit.quem_pagou || '')
+    setContaId(itemEdit.conta_id || '')
+    setContaDestinoId(itemEdit.conta_destino_id || '')
+    setCartaoId(itemEdit.cartao_id || '')
+    setRecorrente(!!itemEdit.recorrente)
+    setFrequencia(itemEdit.frequencia || 'mensal')
+    setVencimento(itemEdit.vencimento || '')
+    setEfetivada(itemEdit.efetivada !== false)
+    setDescricao(itemEdit.descricao || '')
+    setData(itemEdit.data)
+  }, [editando, itemEdit])
+
+  // "Quem pagou" identificado automaticamente pelo login (com opção de trocar).
+  useEffect(() => {
+    if (editando || quemPagouAuto.current || ehPessoal) return
+    const eu = getUsuario() === 'b' ? nomeB : nomeA
+    setQuemPagou(eu)
+    quemPagouAuto.current = true
+  }, [editando, ehPessoal, nomeA, nomeB])
 
   function handleValorInput(e) {
-    const v = e.target.value
-    if (/^\d*([.,]\d{0,2})?$/.test(v)) setRawValor(v)
+    setValorCentavos(digitosParaCentavos(e.target.value))
   }
 
-  const valorNum = parseFloat(rawValor.replace(',', '.')) || 0
+  const valorNum = valorCentavos / 100
   const ehTransferencia = tipo === 'transferencia'
   const ehCartao = tipo === 'cartao'
   const usaCategoria = !ehTransferencia
@@ -61,41 +127,138 @@ function NovoLancamentoPage() {
   const podeSalvar =
     valorNum > 0 &&
     (!usaCategoria || categoria) &&
-    (!ehCartao || cartaoId) &&
-    (!ehTransferencia || (contaId && contaDestinoId && contaId !== contaDestinoId)) &&
+    (ehCartao
+      ? !!cartaoId
+      : ehTransferencia
+        ? (contaId && contaDestinoId && contaId !== contaDestinoId)
+        : !!contaId) &&
     (!mostraQuemPagou || quemPagou)
+
+  function salvarUm(lanc) {
+    if (ehPessoal) lancPessoal.adicionar({ ...lanc, origem: 'manual', ref_casal_id: '' })
+    else lancCasal.adicionar({ ...lanc, quem_pagou: quemPagou })
+  }
+
+  // Gera a lista de lançamentos (1 ou N) a partir do formulário.
+  function montarLancamentos() {
+    const base = {
+      tipo,
+      categoria: usaCategoria ? categoria : '',
+      descricao: descricao.trim(),
+      criado_em: new Date().toISOString(),
+      conta_id: ehCartao ? '' : contaId,
+      conta_destino_id: ehTransferencia ? contaDestinoId : '',
+      cartao_id: ehCartao ? cartaoId : '',
+      vencimento,
+    }
+
+    // Cartão parcelado: uma parcela por mês de fatura.
+    if (ehCartao && parcelas > 1) {
+      const serie = gerarUUID()
+      const cartao = cartoes.find(c => c.id === cartaoId)
+      const baseComp = competenciaCartao(data, cartao?.dia_fechamento || 0)
+      const baseC = Math.floor(valorCentavos / parcelas)
+      const resto = valorCentavos - baseC * parcelas
+      return Array.from({ length: parcelas }, (_, i) => ({
+        ...base,
+        id: gerarUUID(),
+        data: addMeses(data, i),
+        valor: (baseC + (i < resto ? 1 : 0)) / 100,
+        recorrente: false,
+        frequencia: '',
+        serie_id: serie,
+        parcela_num: i + 1,
+        parcela_total: parcelas,
+        pago: false,
+        competencia: compMaisMeses(baseComp, i),
+        efetivada: true,
+      }))
+    }
+
+    // Recorrência: N ocorrências; só a 1ª pode nascer confirmada.
+    if (!ehCartao && recorrente && repeticoes > 1) {
+      const serie = gerarUUID()
+      const passo = (i) =>
+        frequencia === 'semanal' ? addDias(data, i * 7)
+          : frequencia === 'anual' ? addMeses(data, i * 12)
+            : addMeses(data, i)
+      return Array.from({ length: repeticoes }, (_, i) => ({
+        ...base,
+        id: gerarUUID(),
+        data: passo(i),
+        valor: valorNum,
+        recorrente: true,
+        frequencia,
+        serie_id: serie,
+        parcela_num: i + 1,
+        parcela_total: repeticoes,
+        pago: true,
+        competencia: '',
+        efetivada: i === 0 ? efetivada : false,
+      }))
+    }
+
+    // Lançamento único.
+    return [{
+      ...base,
+      id: gerarUUID(),
+      data,
+      valor: valorNum,
+      recorrente,
+      frequencia: recorrente ? frequencia : '',
+      serie_id: '',
+      parcela_num: ehCartao ? 1 : 0,
+      parcela_total: ehCartao ? 1 : 0,
+      pago: ehCartao ? false : true,
+      competencia: ehCartao
+        ? competenciaCartao(data, (cartoes.find(c => c.id === cartaoId)?.dia_fechamento) || 0)
+        : '',
+      efetivada,
+    }]
+  }
 
   async function salvar() {
     if (!podeSalvar || salvando) return
     setSalvando(true)
 
-    const comum = {
-      id:               gerarUUID(),
-      data,
-      valor:            valorNum,
-      tipo,
-      categoria:        usaCategoria ? categoria : '',
-      descricao:        descricao.trim(),
-      criado_em:        new Date().toISOString(),
-      conta_id:         ehCartao ? '' : contaId,
-      conta_destino_id: ehTransferencia ? contaDestinoId : '',
-      cartao_id:        ehCartao ? cartaoId : '',
-      recorrente,
-      frequencia:       recorrente ? frequencia : '',
-      vencimento,
-      efetivada,
-    }
-
-    if (ehPessoal) {
-      lancPessoal.adicionar({ ...comum, origem: 'manual', ref_casal_id: '' })
+    if (editando) {
+      const dados = {
+        data, valor: valorNum, tipo,
+        categoria: usaCategoria ? categoria : '',
+        descricao: descricao.trim(),
+        conta_id: ehCartao ? '' : contaId,
+        conta_destino_id: ehTransferencia ? contaDestinoId : '',
+        cartao_id: ehCartao ? cartaoId : '',
+        recorrente, frequencia: recorrente ? frequencia : '',
+        vencimento, efetivada,
+        ...(mostraQuemPagou ? { quem_pagou: quemPagou } : {}),
+      }
+      if (ehPessoal) lancPessoal.atualizar(editId, dados)
+      else lancCasal.atualizar(editId, dados)
     } else {
-      lancCasal.adicionar({ ...comum, quem_pagou: quemPagou })
+      montarLancamentos().forEach(salvarUm)
     }
 
-    setToast({ mensagem: 'Lançamento salvo!', tipo: 'sucesso' })
+    setToast({ mensagem: editando ? 'Lançamento atualizado!' : 'Lançamento salvo!', tipo: 'sucesso' })
     setSalvando(false)
-    setTimeout(() => navigate('/'), 1000)
+    setTimeout(() => navigate(-1), 800)
   }
+
+  function excluir(serie) {
+    if (!itemEdit) return
+    const hook = ehPessoal ? lancPessoal : lancCasal
+    if (serie && itemEdit.serie_id) {
+      const todos = (ehPessoal ? lancPessoal.todos : lancCasal.todos) || []
+      todos.filter(l => l.serie_id === itemEdit.serie_id).forEach(l => hook.remover(l.id))
+    } else {
+      hook.remover(editId)
+    }
+    setToast({ mensagem: 'Lançamento excluído.', tipo: 'sucesso' })
+    setTimeout(() => navigate(-1), 600)
+  }
+
+  const bloqueadoEdicao = editando && ehPessoal && itemEdit?.origem === 'casal'
+  const ehSerie = editando && itemEdit?.serie_id && (itemEdit?.parcela_total || 0) > 1
 
   return (
     <div className="min-h-full bg-bg-primary">
@@ -108,6 +271,7 @@ function NovoLancamentoPage() {
           </svg>
           Voltar
         </button>
+        {editando && <span className="text-xs text-text-secondary">Editando</span>}
       </div>
 
       <div className="px-4 pb-8 space-y-6">
@@ -115,12 +279,12 @@ function NovoLancamentoPage() {
         <Section titulo="Escopo">
           <div className="flex gap-2">
             {ESCOPOS.map(e => (
-              <button key={e.id} onClick={() => setEscopo(e.id)}
+              <button key={e.id} onClick={() => !editando && setEscopo(e.id)} disabled={editando}
                 className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
                   escopo === e.id
                     ? 'bg-accent-primary/20 border-accent-primary text-accent-primary'
                     : 'bg-bg-card border-border text-text-secondary'
-                }`}>
+                } ${editando ? 'opacity-60' : ''}`}>
                 {e.label}
               </button>
             ))}
@@ -132,9 +296,9 @@ function NovoLancamentoPage() {
           <p className="text-text-secondary text-xs mb-2">Valor</p>
           <div className="flex items-center justify-center gap-2">
             <span className="text-text-secondary text-2xl font-light">R$</span>
-            <input ref={inputRef} type="text" inputMode="decimal" value={rawValor}
-              onChange={handleValorInput} placeholder="0,00"
-              className="text-4xl font-bold text-text-primary bg-transparent outline-none w-40 text-center placeholder:text-border" />
+            <input ref={inputRef} type="text" inputMode="numeric" value={formatarValorInput(valorCentavos)}
+              onChange={handleValorInput}
+              className="text-4xl font-bold text-text-primary bg-transparent outline-none w-48 text-right placeholder:text-border" />
           </div>
         </div>
 
@@ -160,10 +324,25 @@ function NovoLancamentoPage() {
             {cartoes.length === 0 ? (
               <AvisoVazio texto="Nenhum cartão cadastrado." />
             ) : (
-              <select value={cartaoId} onChange={e => setCartaoId(e.target.value)} className={selectCls}>
-                <option value="">Selecione o cartão</option>
-                {cartoes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-              </select>
+              <div className="space-y-2">
+                <select value={cartaoId} onChange={e => setCartaoId(e.target.value)} className={selectCls}>
+                  <option value="">Selecione o cartão</option>
+                  {cartoes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
+                {!editando && (
+                  <div className="flex items-center gap-3 bg-bg-card border border-border rounded-xl px-4 py-3">
+                    <span className="text-sm text-text-secondary flex-shrink-0">Parcelas</span>
+                    <input type="number" min="1" max="48" value={parcelas}
+                      onChange={e => setParcelas(Math.max(1, Math.min(48, parseInt(e.target.value) || 1)))}
+                      className="flex-1 bg-transparent text-sm text-text-primary outline-none text-right" />
+                    {parcelas > 1 && valorNum > 0 && (
+                      <span className="text-xs text-text-secondary">
+                        {parcelas}× de R$ {(Math.floor(valorCentavos / parcelas) / 100).toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </Section>
         )}
@@ -174,11 +353,11 @@ function NovoLancamentoPage() {
             <div className="space-y-2">
               <select value={contaId} onChange={e => setContaId(e.target.value)} className={selectCls}>
                 <option value="">De qual conta</option>
-                {contas.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                {contas.map(c => <option key={c.id} value={c.id}>{c.nome} · {c._escopo}</option>)}
               </select>
               <select value={contaDestinoId} onChange={e => setContaDestinoId(e.target.value)} className={selectCls}>
                 <option value="">Para qual conta</option>
-                {contas.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                {contas.map(c => <option key={c.id} value={c.id}>{c.nome} · {c._escopo}</option>)}
               </select>
             </div>
             {contas.length < 2 && <AvisoVazio texto="Cadastre ao menos duas contas." />}
@@ -186,11 +365,11 @@ function NovoLancamentoPage() {
         ) : !ehCartao && (
           <Section titulo="Conta">
             {contas.length === 0 ? (
-              <AvisoVazio texto="Nenhuma conta cadastrada (opcional)." />
+              <AvisoVazio texto="Cadastre uma conta na Carteira para lançar." />
             ) : (
               <select value={contaId} onChange={e => setContaId(e.target.value)} className={selectCls}>
-                <option value="">Sem conta</option>
-                {contas.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                <option value="">Selecione a conta</option>
+                {contas.map(c => <option key={c.id} value={c.id}>{c.nome} · {c._escopo}</option>)}
               </select>
             )}
           </Section>
@@ -234,28 +413,45 @@ function NovoLancamentoPage() {
         )}
 
         {/* Recorrência / vencimento / efetivada */}
-        <Section titulo="Programação">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between bg-bg-card border border-border rounded-xl px-4 py-3">
-              <span className="text-sm text-text-primary">Recorrente</span>
-              <Toggle ativo={recorrente} onToggle={() => setRecorrente(v => !v)} />
+        {!ehCartao && (
+          <Section titulo="Programação">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between bg-bg-card border border-border rounded-xl px-4 py-3">
+                <span className="text-sm text-text-primary">Recorrente</span>
+                <Toggle ativo={recorrente} onToggle={() => setRecorrente(v => !v)} />
+              </div>
+              {recorrente && (
+                <>
+                  <select value={frequencia} onChange={e => setFrequencia(e.target.value)} className={selectCls}>
+                    {FREQUENCIAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                  </select>
+                  {!editando && (
+                    <div className="flex items-center gap-3 bg-bg-card border border-border rounded-xl px-4 py-3">
+                      <span className="text-sm text-text-secondary flex-shrink-0">Repetições</span>
+                      <input type="number" min="1" max="60" value={repeticoes}
+                        onChange={e => setRepeticoes(Math.max(1, Math.min(60, parseInt(e.target.value) || 1)))}
+                        className="flex-1 bg-transparent text-sm text-text-primary outline-none text-right" />
+                    </div>
+                  )}
+                  {!editando && repeticoes > 1 && (
+                    <p className="text-xs text-text-secondary px-1">
+                      As próximas {repeticoes - 1} ficam pendentes de confirmação (em Agendados).
+                    </p>
+                  )}
+                </>
+              )}
+              <div className="flex items-center gap-3 bg-bg-card border border-border rounded-xl px-4 py-3">
+                <span className="text-sm text-text-secondary flex-shrink-0">Vencimento</span>
+                <input type="date" value={vencimento} onChange={e => setVencimento(e.target.value)}
+                  className="flex-1 bg-transparent text-sm text-text-primary outline-none text-right" />
+              </div>
+              <div className="flex items-center justify-between bg-bg-card border border-border rounded-xl px-4 py-3">
+                <span className="text-sm text-text-primary">Já efetivada</span>
+                <Toggle ativo={efetivada} onToggle={() => setEfetivada(v => !v)} />
+              </div>
             </div>
-            {recorrente && (
-              <select value={frequencia} onChange={e => setFrequencia(e.target.value)} className={selectCls}>
-                {FREQUENCIAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-              </select>
-            )}
-            <div className="flex items-center gap-3 bg-bg-card border border-border rounded-xl px-4 py-3">
-              <span className="text-sm text-text-secondary flex-shrink-0">Vencimento</span>
-              <input type="date" value={vencimento} onChange={e => setVencimento(e.target.value)}
-                className="flex-1 bg-transparent text-sm text-text-primary outline-none text-right" />
-            </div>
-            <div className="flex items-center justify-between bg-bg-card border border-border rounded-xl px-4 py-3">
-              <span className="text-sm text-text-primary">Já efetivada</span>
-              <Toggle ativo={efetivada} onToggle={() => setEfetivada(v => !v)} />
-            </div>
-          </div>
-        </Section>
+          </Section>
+        )}
 
         {/* Detalhes */}
         <Section titulo="Detalhes (opcionais)">
@@ -270,10 +466,43 @@ function NovoLancamentoPage() {
           </div>
         </Section>
 
-        <button onClick={salvar} disabled={!podeSalvar || salvando}
+        {bloqueadoEdicao && (
+          <p className="text-xs text-danger px-1">
+            Este item é uma cópia automática de uma despesa do casal e não pode ser editado aqui.
+          </p>
+        )}
+
+        <button onClick={salvar} disabled={!podeSalvar || salvando || bloqueadoEdicao}
           className="w-full py-3.5 rounded-2xl bg-accent-primary text-white text-base font-semibold disabled:opacity-40 active:scale-95 transition-all">
-          {salvando ? 'Salvando...' : 'Salvar'}
+          {salvando ? 'Salvando...' : editando ? 'Salvar alterações' : 'Salvar'}
         </button>
+
+        {/* Excluir (modo edição) */}
+        {editando && !bloqueadoEdicao && (
+          confirmExcluir ? (
+            <div className="space-y-2">
+              {ehSerie && (
+                <button onClick={() => excluir(true)}
+                  className="w-full py-3 rounded-2xl bg-danger/15 text-danger text-sm font-semibold active:scale-95 transition-all">
+                  Excluir toda a série ({itemEdit.parcela_total})
+                </button>
+              )}
+              <button onClick={() => excluir(false)}
+                className="w-full py-3 rounded-2xl bg-danger/15 text-danger text-sm font-semibold active:scale-95 transition-all">
+                {ehSerie ? 'Excluir só este' : 'Confirmar exclusão'}
+              </button>
+              <button onClick={() => setConfirmExcluir(false)}
+                className="w-full py-3 rounded-2xl bg-bg-card border border-border text-text-secondary text-sm active:scale-95 transition-all">
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmExcluir(true)}
+              className="w-full py-3 rounded-2xl border border-danger/40 text-danger text-sm font-semibold active:scale-95 transition-all">
+              Excluir lançamento
+            </button>
+          )
+        )}
       </div>
 
       {toast && <Toast mensagem={toast.mensagem} tipo={toast.tipo} onClose={() => setToast(null)} />}

@@ -10,8 +10,9 @@ import HistoricoPage from './pages/Historico/HistoricoPage'
 import CarteiraPage from './pages/Carteira/CarteiraPage'
 import ConfiguracoesPage from './pages/Configuracoes/ConfiguracoesPage'
 
-// Lazy load do Dashboard para isolar o chunk do Recharts
+// Lazy load das telas com Recharts para isolar o chunk
 const DashboardPage = lazy(() => import('./pages/Dashboard/DashboardPage'))
+const CartaoPage = lazy(() => import('./pages/Cartao/CartaoPage'))
 
 const Carregando = (
   <div className="flex items-center justify-center h-full py-20 text-text-secondary text-sm">
@@ -37,6 +38,11 @@ function App() {
             <Route path="/novo" element={<NovoLancamentoPage />} />
             <Route path="/historico" element={<HistoricoPage />} />
             <Route path="/carteira" element={<CarteiraPage />} />
+            <Route path="/cartao/:id" element={
+              <Suspense fallback={Carregando}>
+                <CartaoPage />
+              </Suspense>
+            } />
             <Route path="/dashboard" element={
               <Suspense fallback={Carregando}>
                 <DashboardPage />

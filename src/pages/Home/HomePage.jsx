@@ -1,32 +1,51 @@
 import { useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import useLancamentos from '../../hooks/useLancamentos'
 import usePessoal from '../../hooks/usePessoal'
-import useConfig from '../../hooks/useConfig'
+import useConfig, { orcamentoDoEscopo } from '../../hooks/useConfig'
 import useCategorias from '../../hooks/useCategorias'
+import useTodasContas from '../../hooks/useTodasContas'
+import useCartoes from '../../hooks/useCartoes'
+import { getUsuario } from '../../services/storage'
 import { formatarMoeda, formatarDataCurta } from '../../utils/formatters'
 import { iconeCategoria } from '../../constants/categories'
 import { ESCOPOS_FILTRO, iconeTipoLancamento } from '../../constants/financas'
-import { combinarLancamentos, somaReceitas, somaDespesas } from '../../utils/lancamentos'
+import { combinarLancamentos, somaReceitas, somaDespesas, saldoConta, usoCartao } from '../../utils/lancamentos'
 
 function HomePage() {
   const now = new Date()
   const mes = now.getMonth() + 1
   const ano = now.getFullYear()
+  const navigate = useNavigate()
 
-  const [escopo, setEscopo] = useState('tudo')
+  const [escopo, setEscopo] = useState('pessoal')
 
   const casal = useLancamentos(mes, ano)
   const pessoal = usePessoal(mes, ano)
   const { config } = useConfig()
   const { categorias } = useCategorias()
+  const { contas } = useTodasContas()
+  const casalCartoes = useCartoes('casal')
+  const pessoalCartoes = useCartoes('pessoal')
 
   const lancamentos = combinarLancamentos(casal.lancamentos, pessoal.lancamentos, escopo)
+  // Para saldos e cartões usamos todos os lançamentos (de todos os meses) das duas esferas.
+  const todosLanc = [...(casal.todos || []), ...(pessoal.todos || [])]
 
   const totalDespesas = somaDespesas(lancamentos)
   const totalReceitas = somaReceitas(lancamentos)
   const saldo = totalReceitas - totalDespesas
-  const orcamento = parseFloat(config.orcamento_mensal) || 0
+  const orcamento = orcamentoDoEscopo(config, escopo, getUsuario())
   const pct = orcamento > 0 ? Math.min((totalDespesas / orcamento) * 100, 100) : 0
+
+  const pendentesCount = todosLanc.filter(l => l.efetivada === false).length
+  const contasFiltradas = escopo === 'tudo' ? contas : contas.filter(c => c._escopo === escopo)
+  const cartoes = [
+    ...casalCartoes.cartoes.map(c => ({ ...c, _escopo: 'casal' })),
+    ...pessoalCartoes.cartoes.map(c => ({ ...c, _escopo: 'pessoal' })),
+  ]
+  const cartoesFiltrados = escopo === 'tudo' ? cartoes : cartoes.filter(c => c._escopo === escopo)
+  const saldoTotal = contasFiltradas.reduce((s, c) => s + saldoConta(c, todosLanc), 0)
 
   const ultimos5 = [...lancamentos]
     .sort((a, b) => (b.criado_em ?? '').localeCompare(a.criado_em ?? ''))
@@ -69,6 +88,15 @@ function HomePage() {
         ))}
       </div>
 
+      {/* Atalho para agendados pendentes */}
+      {pendentesCount > 0 && (
+        <button onClick={() => navigate('/historico?agendados=1')}
+          className="w-full mb-4 flex items-center justify-between bg-accent-primary/10 border border-accent-primary/30 rounded-xl px-4 py-3 active:opacity-70">
+          <span className="text-sm text-text-primary">📅 {pendentesCount} agendado(s) a confirmar</span>
+          <span className="text-accent-primary text-sm">›</span>
+        </button>
+      )}
+
       {/* Cards de resumo */}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="bg-bg-card rounded-2xl border border-border p-4">
@@ -99,6 +127,52 @@ function HomePage() {
         </div>
       )}
 
+      {/* Saldos das contas */}
+      {contasFiltradas.length > 0 && (
+        <div className="bg-bg-card rounded-2xl border border-border p-4 mb-4">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Contas</span>
+            <span className="text-sm font-bold text-text-primary">{formatarMoeda(saldoTotal)}</span>
+          </div>
+          <div className="space-y-1.5">
+            {contasFiltradas.map(c => (
+              <div key={c.id} className="flex justify-between text-sm">
+                <span className="text-text-secondary truncate">{c.nome}</span>
+                <span className="text-text-primary font-medium">{formatarMoeda(saldoConta(c, todosLanc))}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Cartões de crédito */}
+      {cartoesFiltrados.length > 0 && (
+        <div className="bg-bg-card rounded-2xl border border-border p-4 mb-4">
+          <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Cartões de crédito</span>
+          <div className="space-y-2.5 mt-2">
+            {cartoesFiltrados.map(c => {
+              const u = usoCartao(c, todosLanc)
+              const p = u.limite > 0 ? Math.min(100, (u.usado / u.limite) * 100) : 0
+              return (
+                <button key={c.id} onClick={() => navigate(`/cartao/${c.id}?escopo=${c._escopo}`)}
+                  className="w-full text-left active:opacity-70">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-text-secondary truncate">{c.nome}</span>
+                    <span className="text-text-primary">{formatarMoeda(u.usado)} / {formatarMoeda(u.limite)}</span>
+                  </div>
+                  {u.limite > 0 && (
+                    <div className="h-1.5 rounded-full bg-border overflow-hidden mt-1">
+                      <div className={`h-full ${p < 70 ? 'bg-accent-secondary' : p < 90 ? 'bg-yellow-500' : 'bg-danger'}`}
+                        style={{ width: `${p}%` }} />
+                    </div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {(casal.erro || pessoal.erro) && (
         <div className="bg-danger/10 border border-danger/30 rounded-xl px-4 py-3 mb-4">
           <p className="text-danger text-xs">{casal.erro || pessoal.erro}</p>
@@ -119,14 +193,17 @@ function HomePage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {ultimos5.map(l => <ItemLancamento key={l.id} lancamento={l} categorias={categorias} />)}
+          {ultimos5.map(l => (
+            <ItemLancamento key={l.id} lancamento={l} categorias={categorias}
+              onClick={() => navigate(`/novo?id=${l.id}&escopo=${l._escopo}`)} />
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-function ItemLancamento({ lancamento, categorias }) {
+function ItemLancamento({ lancamento, categorias, onClick }) {
   const { descricao, categoria, valor, tipo, quem_pagou, data, sincronizado, efetivada, _escopo } = lancamento
   const ehReceita = tipo === 'receita'
   const ehTransf = tipo === 'transferencia'
@@ -137,7 +214,8 @@ function ItemLancamento({ lancamento, categorias }) {
     .filter(Boolean).join(' · ')
 
   return (
-    <div className="flex items-center gap-3 bg-bg-card rounded-xl border border-border px-4 py-3 animate-fade-in">
+    <button onClick={onClick}
+      className="w-full flex items-center gap-3 bg-bg-card rounded-xl border border-border px-4 py-3 animate-fade-in text-left active:opacity-70">
       <span className="text-xl w-8 text-center">{icone}</span>
       <div className="flex-1 min-w-0">
         <p className="text-text-primary text-sm font-medium truncate">{descricao || categoria || 'Transferência'}</p>
@@ -151,7 +229,7 @@ function ItemLancamento({ lancamento, categorias }) {
           {efetivada === false ? '📅' : ''}{!sincronizado ? '⏳' : ''}
         </p>
       </div>
-    </div>
+    </button>
   )
 }
 

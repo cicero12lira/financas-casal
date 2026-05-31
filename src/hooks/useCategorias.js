@@ -55,7 +55,18 @@ function useCategorias() {
     await persistir(categorias.filter(c => c.id !== id))
   }
 
-  return { categorias, adicionar, editar, remover }
+  // Move uma categoria para cima ('cima') ou para baixo ('baixo') na ordem.
+  async function mover(id, dir) {
+    const i = categorias.findIndex(c => c.id === id)
+    if (i < 0) return
+    const j = dir === 'cima' ? i - 1 : i + 1
+    if (j < 0 || j >= categorias.length) return
+    const novas = [...categorias]
+    ;[novas[i], novas[j]] = [novas[j], novas[i]]
+    await persistir(novas)
+  }
+
+  return { categorias, adicionar, editar, remover, mover }
 }
 
 export default useCategorias

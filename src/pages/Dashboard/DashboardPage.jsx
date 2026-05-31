@@ -7,6 +7,8 @@ import {
 import useLancamentos from '../../hooks/useLancamentos'
 import usePessoal from '../../hooks/usePessoal'
 import useCategorias from '../../hooks/useCategorias'
+import useConfig, { orcamentoDoEscopo } from '../../hooks/useConfig'
+import { getUsuario } from '../../services/storage'
 import { formatarMoeda, formatarMesAno } from '../../utils/formatters'
 import { iconeCategoria } from '../../constants/categories'
 import { ESCOPOS_FILTRO, ehDespesa } from '../../constants/financas'
@@ -24,15 +26,26 @@ function DashboardPage() {
   const mes = now.getMonth() + 1
   const ano = now.getFullYear()
 
-  const [escopo, setEscopo] = useState('tudo')
+  const [escopo, setEscopo] = useState('pessoal')
 
   const casal = useLancamentos(mes, ano)
   const pessoal = usePessoal(mes, ano)
   const { categorias } = useCategorias()
+  const { config } = useConfig()
 
   const lancamentos = combinarLancamentos(casal.lancamentos, pessoal.lancamentos, escopo)
   const despesas = lancamentos.filter(l => ehDespesa(l.tipo) && l.efetivada !== false)
   const totalDespesas = despesas.reduce((s, l) => s + l.valor, 0)
+  const orcamento = orcamentoDoEscopo(config, escopo, getUsuario())
+
+  const porPessoa = useMemo(() => {
+    const m = new Map()
+    despesas.forEach(l => {
+      const k = l.quem_pagou || (l._escopo === 'pessoal' ? 'Pessoal' : 'Casal')
+      m.set(k, (m.get(k) || 0) + l.valor)
+    })
+    return [...m.entries()].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
+  }, [despesas])
 
   const porCategoria = useMemo(() =>
     categorias
@@ -129,6 +142,65 @@ function DashboardPage() {
                   <p className="text-text-secondary text-xs">{maiorGasto.quem_pagou || (maiorGasto._escopo === 'pessoal' ? 'Pessoal' : 'Casal')}</p>
                 </div>
                 <p className="text-danger font-bold text-lg flex-shrink-0">{formatarMoeda(maiorGasto.valor)}</p>
+              </div>
+            </section>
+          )}
+
+          {/* Orçado × realizado */}
+          {orcamento > 0 && (
+            <section>
+              <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">Orçado × realizado</h2>
+              <div className="bg-bg-card rounded-2xl border border-border p-4">
+                {(() => {
+                  const p = Math.min(100, (totalDespesas / orcamento) * 100)
+                  const restante = orcamento - totalDespesas
+                  return (
+                    <>
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="text-text-secondary">{formatarMoeda(totalDespesas)}</span>
+                        <span className="text-text-secondary">de {formatarMoeda(orcamento)}</span>
+                      </div>
+                      <div className="h-2.5 bg-border rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${p >= 90 ? 'bg-danger' : p >= 70 ? 'bg-yellow-400' : 'bg-accent-secondary'}`}
+                          style={{ width: `${p}%` }} />
+                      </div>
+                      <p className={`text-xs mt-2 text-right ${restante >= 0 ? 'text-accent-secondary' : 'text-danger'}`}>
+                        {restante >= 0 ? `${formatarMoeda(restante)} disponível` : `${formatarMoeda(-restante)} acima`}
+                      </p>
+                    </>
+                  )
+                })()}
+              </div>
+            </section>
+          )}
+
+          {/* Divisão por pessoa */}
+          {porPessoa.length > 1 && (
+            <section>
+              <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-4">Por pessoa</h2>
+              <div className="flex items-center gap-4">
+                <div style={{ width: 150, height: 150, flexShrink: 0 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={porPessoa} cx="50%" cy="50%" innerRadius={40} outerRadius={65} dataKey="value" paddingAngle={2}>
+                        {porPessoa.map((_, i) => <Cell key={i} fill={CORES[i % CORES.length]} />)}
+                      </Pie>
+                      <Tooltip formatter={v => formatarMoeda(v)}
+                        contentStyle={{ background: '#111827', border: '1px solid #1e2a45', borderRadius: 12, fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex-1 space-y-2 min-w-0">
+                  {porPessoa.map((p, i) => (
+                    <div key={p.name} className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: CORES[i % CORES.length] }} />
+                      <span className="text-xs text-text-secondary truncate flex-1">{p.name}</span>
+                      <span className="text-xs text-text-primary font-medium">
+                        {totalDespesas > 0 ? ((p.value / totalDespesas) * 100).toFixed(0) : 0}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
           )}

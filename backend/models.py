@@ -46,7 +46,14 @@ class Lancamento(Base):
     recorrente: Mapped[bool] = mapped_column(Boolean, default=False)
     frequencia: Mapped[str] = mapped_column(String, default="")
     vencimento: Mapped[str] = mapped_column(String, default="")
-    efetivada: Mapped[bool] = mapped_column(Boolean, default=True)
+    efetivada: Mapped[bool] = mapped_column(Boolean, default=True)  # False = agendado pendente de confirmação
+
+    # Parcelas (cartão) e séries de recorrência
+    serie_id: Mapped[str] = mapped_column(String, default="", index=True)  # agrupa parcelas/recorrências
+    parcela_num: Mapped[int] = mapped_column(Integer, default=0)            # ex.: 2 de 12
+    parcela_total: Mapped[int] = mapped_column(Integer, default=0)
+    pago: Mapped[bool] = mapped_column(Boolean, default=True)               # cartão: False até a fatura ser paga
+    competencia: Mapped[str] = mapped_column(String, default="")            # YYYY-MM (mês da fatura do cartão)
 
     # Só usados no escopo pessoal
     origem: Mapped[str] = mapped_column(String, default="manual")   # manual | casal

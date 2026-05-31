@@ -40,6 +40,11 @@ class LancamentoIn(BaseModel):
     frequencia: str = ""
     vencimento: str = ""
     efetivada: bool = True
+    serie_id: str = ""
+    parcela_num: int = 0
+    parcela_total: int = 0
+    pago: bool = True
+    competencia: str = ""
     origem: str = "manual"
     ref_casal_id: str = ""
 
@@ -59,6 +64,11 @@ class LancamentoUpdate(BaseModel):
     frequencia: str | None = None
     vencimento: str | None = None
     efetivada: bool | None = None
+    serie_id: str | None = None
+    parcela_num: int | None = None
+    parcela_total: int | None = None
+    pago: bool | None = None
+    competencia: str | None = None
 
 
 # ---------- Contas ----------

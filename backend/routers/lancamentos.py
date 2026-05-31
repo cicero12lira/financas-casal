@@ -16,6 +16,21 @@ def _query_escopo(db, escopo, usuario):
     return q
 
 
+def _validar(tipo, conta_id, cartao_id, conta_destino_id):
+    """Garante que o lançamento tenha origem/destino de fundos coerente com o tipo."""
+    if tipo == "cartao":
+        if not cartao_id:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selecione o cartão.")
+    elif tipo == "transferencia":
+        if not conta_id or not conta_destino_id:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selecione as contas de origem e destino.")
+        if conta_id == conta_destino_id:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "As contas de origem e destino devem ser diferentes.")
+    else:  # gasto | receita
+        if not conta_id:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selecione a conta.")
+
+
 @router.get("")
 def listar(
     escopo: str = Query("casal"),
@@ -33,6 +48,7 @@ def criar(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(usuario_atual),
 ):
+    _validar(dados.tipo, dados.conta_id, dados.cartao_id, dados.conta_destino_id)
     payload = dados.model_dump()
     lanc = Lancamento(
         **payload,
@@ -58,6 +74,7 @@ def atualizar(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Sem acesso a este lançamento.")
     for campo, valor in dados.model_dump(exclude_unset=True).items():
         setattr(lanc, campo, valor)
+    _validar(lanc.tipo, lanc.conta_id, lanc.cartao_id, lanc.conta_destino_id)
     db.commit()
     return serializers.lancamento(lanc)
 

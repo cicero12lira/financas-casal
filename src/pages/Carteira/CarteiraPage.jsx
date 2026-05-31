@@ -2,10 +2,14 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useContas from '../../hooks/useContas'
 import useCartoes from '../../hooks/useCartoes'
+import useTiposConta from '../../hooks/useTiposConta'
+import useLancamentos from '../../hooks/useLancamentos'
+import usePessoal from '../../hooks/usePessoal'
 import Toast from '../../components/ui/Toast'
 import { gerarUUID } from '../../utils/uuid'
 import { formatarMoeda } from '../../utils/formatters'
-import { TIPOS_CONTA, BANDEIRAS, ESCOPOS, labelTipoConta, iconeTipoConta } from '../../constants/financas'
+import { saldoConta, usoCartao } from '../../utils/lancamentos'
+import { BANDEIRAS, ESCOPOS, labelTipoConta, iconeTipoConta } from '../../constants/financas'
 
 const inputCls = 'w-full bg-bg-primary border border-border rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-text-secondary outline-none focus:border-accent-primary transition-colors'
 const btnPrimCls = 'px-4 py-2 rounded-xl bg-accent-primary text-white text-sm font-medium disabled:opacity-40 active:scale-95 transition-all'
@@ -13,11 +17,16 @@ const btnSecCls = 'px-4 py-2 rounded-xl bg-bg-card border border-border text-tex
 
 function CarteiraPage() {
   const navigate = useNavigate()
-  const [escopo, setEscopo] = useState('casal')
+  const [escopo, setEscopo] = useState('pessoal')
   const [toast, setToast] = useState(null)
 
   const contas = useContas(escopo)
   const cartoes = useCartoes(escopo)
+  const tiposConta = useTiposConta()
+  const now = new Date()
+  const casalLanc = useLancamentos(now.getMonth() + 1, now.getFullYear())
+  const pessoalLanc = usePessoal(now.getMonth() + 1, now.getFullYear())
+  const lancScope = escopo === 'pessoal' ? (pessoalLanc.todos || []) : (casalLanc.todos || [])
   const temCreds = contas.temCreds
 
   function showToast(mensagem, tipo = 'sucesso') { setToast({ mensagem, tipo }) }
@@ -54,8 +63,9 @@ function CarteiraPage() {
         </div>
       ) : (
         <>
-          <SecaoContas escopo={escopo} hook={contas} onMsg={showToast} />
-          <SecaoCartoes escopo={escopo} hook={cartoes} contas={contas.contas} onMsg={showToast} />
+          <SecaoContas escopo={escopo} hook={contas} tipos={tiposConta.tipos} lancamentos={lancScope} onMsg={showToast} />
+          <SecaoCartoes escopo={escopo} hook={cartoes} contas={contas.contas} lancamentos={lancScope}
+            onAbrir={id => navigate(`/cartao/${id}?escopo=${escopo}`)} onMsg={showToast} />
         </>
       )}
     </div>
@@ -64,7 +74,7 @@ function CarteiraPage() {
 
 // --- Contas ---
 
-function SecaoContas({ hook, onMsg }) {
+function SecaoContas({ hook, tipos, lancamentos, onMsg }) {
   const { contas, adicionar, atualizar, remover } = hook
   const [editando, setEditando] = useState(null) // id | 'novo' | null
 
@@ -90,19 +100,21 @@ function SecaoContas({ hook, onMsg }) {
       </div>
 
       {editando === 'novo' && (
-        <ContaForm onSalvar={d => salvar(d)} onCancelar={() => setEditando(null)} />
+        <ContaForm tipos={tipos} onSalvar={d => salvar(d)} onCancelar={() => setEditando(null)} />
       )}
 
       <div className="space-y-2">
         {contas.map(c => (
           editando === c.id ? (
-            <ContaForm key={c.id} inicial={c} onSalvar={d => salvar(d, c.id)} onCancelar={() => setEditando(null)} />
+            <ContaForm key={c.id} inicial={c} tipos={tipos} onSalvar={d => salvar(d, c.id)} onCancelar={() => setEditando(null)} />
           ) : (
             <div key={c.id} className="flex items-center gap-3 bg-bg-card rounded-xl border border-border px-4 py-3">
-              <span className="text-xl w-8 text-center">{iconeTipoConta(c.tipo)}</span>
+              <span className="text-xl w-8 text-center">{iconeTipoConta(c.tipo, tipos)}</span>
               <div className="flex-1 min-w-0">
                 <p className="text-text-primary text-sm font-medium truncate">{c.nome}</p>
-                <p className="text-text-secondary text-xs">{labelTipoConta(c.tipo)} · {formatarMoeda(c.saldo_inicial)}</p>
+                <p className="text-text-secondary text-xs">
+                  {labelTipoConta(c.tipo, tipos)} · saldo {formatarMoeda(saldoConta(c, lancamentos))}
+                </p>
               </div>
               {!c.sincronizado && <span className="text-xs text-text-secondary">⏳</span>}
               <button onClick={() => setEditando(c.id)} className="text-xs text-accent-primary active:opacity-70">Editar</button>
@@ -118,16 +130,16 @@ function SecaoContas({ hook, onMsg }) {
   )
 }
 
-function ContaForm({ inicial, onSalvar, onCancelar }) {
+function ContaForm({ inicial, tipos, onSalvar, onCancelar }) {
   const [nome, setNome] = useState(inicial?.nome ?? '')
-  const [tipo, setTipo] = useState(inicial?.tipo ?? 'corrente')
+  const [tipo, setTipo] = useState(inicial?.tipo ?? (tipos[0]?.id || 'corrente'))
   const [saldo, setSaldo] = useState(inicial ? String(inicial.saldo_inicial) : '')
 
   return (
     <div className="bg-bg-card border border-accent-primary/40 rounded-xl p-3 space-y-3 mb-2">
       <input value={nome} onChange={e => setNome(e.target.value)} placeholder="Nome da conta" maxLength={40} className={inputCls} />
       <select value={tipo} onChange={e => setTipo(e.target.value)} className={inputCls}>
-        {TIPOS_CONTA.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+        {tipos.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
       </select>
       <input type="text" inputMode="decimal" value={saldo} onChange={e => setSaldo(e.target.value)} placeholder="Saldo inicial (R$)" className={inputCls} />
       <div className="flex gap-2">
@@ -140,7 +152,7 @@ function ContaForm({ inicial, onSalvar, onCancelar }) {
 
 // --- Cartões ---
 
-function SecaoCartoes({ hook, contas, onMsg }) {
+function SecaoCartoes({ hook, contas, lancamentos, onAbrir, onMsg }) {
   const { cartoes, adicionar, atualizar, remover } = hook
   const [editando, setEditando] = useState(null)
 
@@ -174,19 +186,9 @@ function SecaoCartoes({ hook, contas, onMsg }) {
           editando === c.id ? (
             <CartaoForm key={c.id} inicial={c} contas={contas} onSalvar={d => salvar(d, c.id)} onCancelar={() => setEditando(null)} />
           ) : (
-            <div key={c.id} className="flex items-center gap-3 bg-bg-card rounded-xl border border-border px-4 py-3">
-              <span className="text-xl w-8 text-center">💳</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-text-primary text-sm font-medium truncate">{c.nome}</p>
-                <p className="text-text-secondary text-xs">
-                  {c.bandeira ? `${c.bandeira} · ` : ''}Limite {formatarMoeda(c.limite)}
-                  {c.dia_vencimento ? ` · vence dia ${c.dia_vencimento}` : ''}
-                </p>
-              </div>
-              {!c.sincronizado && <span className="text-xs text-text-secondary">⏳</span>}
-              <button onClick={() => setEditando(c.id)} className="text-xs text-accent-primary active:opacity-70">Editar</button>
-              <button onClick={() => { remover(c.id); onMsg('Cartão removido.') }} className="text-xs text-danger active:opacity-70">Excluir</button>
-            </div>
+            <CartaoCard key={c.id} cartao={c} uso={usoCartao(c, lancamentos)}
+              onAbrir={() => onAbrir(c.id)} onEditar={() => setEditando(c.id)}
+              onRemover={() => { remover(c.id); onMsg('Cartão removido.') }} />
           )
         ))}
         {cartoes.length === 0 && editando !== 'novo' && (
@@ -194,6 +196,41 @@ function SecaoCartoes({ hook, contas, onMsg }) {
         )}
       </div>
     </section>
+  )
+}
+
+function CartaoCard({ cartao, uso, onAbrir, onEditar, onRemover }) {
+  const pct = uso.limite > 0 ? Math.min(100, (uso.usado / uso.limite) * 100) : 0
+  const cor = pct < 70 ? 'bg-accent-secondary' : pct < 90 ? 'bg-yellow-500' : 'bg-danger'
+  return (
+    <div className="bg-bg-card rounded-xl border border-border px-4 py-3">
+      <button onClick={onAbrir} className="w-full flex items-center gap-3 text-left active:opacity-70">
+        <span className="text-xl w-8 text-center">💳</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-text-primary text-sm font-medium truncate">{cartao.nome}</p>
+          <p className="text-text-secondary text-xs">
+            {cartao.bandeira ? `${cartao.bandeira} · ` : ''}Limite {formatarMoeda(cartao.limite)}
+            {cartao.dia_vencimento ? ` · vence dia ${cartao.dia_vencimento}` : ''}
+          </p>
+        </div>
+        <span className="text-text-secondary text-sm">›</span>
+      </button>
+      {uso.limite > 0 && (
+        <div className="mt-2">
+          <div className="h-1.5 rounded-full bg-border overflow-hidden">
+            <div className={`h-full ${cor} transition-all`} style={{ width: `${pct}%` }} />
+          </div>
+          <div className="flex justify-between mt-1 text-[11px] text-text-secondary">
+            <span>Usado {formatarMoeda(uso.usado)}</span>
+            <span>Disponível {formatarMoeda(uso.disponivel)}</span>
+          </div>
+        </div>
+      )}
+      <div className="flex gap-4 mt-2 justify-end">
+        <button onClick={onEditar} className="text-xs text-accent-primary active:opacity-70">Editar</button>
+        <button onClick={onRemover} className="text-xs text-danger active:opacity-70">Excluir</button>
+      </div>
+    </div>
   )
 }
 
