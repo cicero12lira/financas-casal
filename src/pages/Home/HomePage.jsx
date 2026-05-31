@@ -38,7 +38,10 @@ function HomePage() {
   const orcamento = orcamentoDoEscopo(config, escopo, getUsuario())
   const pct = orcamento > 0 ? Math.min((totalDespesas / orcamento) * 100, 100) : 0
 
-  const pendentesCount = todosLanc.filter(l => l.efetivada === false).length
+  const hoje = now.toISOString().split('T')[0]
+  // Só mostra na Home os agendados do dia ou atrasados (data <= hoje).
+  const agendadosVisiveis = todosLanc.filter(l => l.efetivada === false && l.data <= hoje)
+  const pendentesCount = agendadosVisiveis.length
   const contasFiltradas = escopo === 'tudo' ? contas : contas.filter(c => c._escopo === escopo)
   const cartoes = [
     ...casalCartoes.cartoes.map(c => ({ ...c, _escopo: 'casal' })),

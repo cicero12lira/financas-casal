@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
 import {
   PieChart, Pie, Cell,
-  BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
+  BarChart, Bar,
+  LineChart, Line,
+  XAxis, YAxis, Tooltip, Legend, ReferenceLine,
   ResponsiveContainer,
 } from 'recharts'
 import useLancamentos from '../../hooks/useLancamentos'
@@ -78,6 +80,31 @@ function DashboardPage() {
     }
     return result
   }, [mes, ano, escopo, casal.todos, pessoal.todos])
+
+  // Previsão: lançamentos futuros (efetivada=false) agrupados por mês (próximos 6).
+  const previsao = useMemo(() => {
+    const todosFuturos = combinarLancamentos(
+      (casal.todos || []).filter(l => l.efetivada === false),
+      (pessoal.todos || []).filter(l => l.efetivada === false),
+      escopo,
+    )
+    const result = []
+    for (let i = 0; i <= 5; i++) {
+      const d = new Date(ano, mes - 1 + i, 1)
+      const m = d.getMonth() + 1
+      const a = d.getFullYear()
+      const lista = todosFuturos.filter(l => doMes(l, m, a))
+      result.push({
+        label: formatarMesAno(m, a).slice(0, 3),
+        Receitas: somaReceitas(lista, { soEfetivadas: false }),
+        Despesas: somaDespesas(lista, { soEfetivadas: false }),
+        Saldo: somaReceitas(lista, { soEfetivadas: false }) - somaDespesas(lista, { soEfetivadas: false }),
+      })
+    }
+    return result
+  }, [mes, ano, escopo, casal.todos, pessoal.todos])
+
+  const temPrevisao = previsao.some(p => p.Receitas > 0 || p.Despesas > 0)
 
   return (
     <div className="px-4 pt-4 pb-6 space-y-6">
@@ -239,6 +266,29 @@ function DashboardPage() {
                   </div>
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* Previsão futura */}
+          {temPrevisao && (
+            <section>
+              <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-1">Previsão (próx. 6 meses)</h2>
+              <p className="text-[11px] text-text-secondary mb-4">Baseada nos lançamentos agendados/pendentes.</p>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={previsao} margin={{ top: 0, right: 4, left: -20, bottom: 0 }}>
+                  <XAxis dataKey="label" tick={{ fill: '#8892b0', fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: '#8892b0', fontSize: 10 }} axisLine={false} tickLine={false}
+                    tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
+                  <Tooltip formatter={v => formatarMoeda(v)}
+                    contentStyle={{ background: '#111827', border: '1px solid #1e2a45', borderRadius: 12, fontSize: 12 }}
+                    labelStyle={{ color: '#8892b0' }} />
+                  <ReferenceLine y={0} stroke="#1e2a45" />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Line type="monotone" dataKey="Receitas" stroke="#00d4aa" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="Despesas" stroke="#ff4757" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="Saldo" stroke="#6c63ff" strokeWidth={2} strokeDasharray="4 2" dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
             </section>
           )}
         </>
